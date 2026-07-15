@@ -1319,6 +1319,41 @@ body {
     height: 30px;
 }
 
+.result-set-tab-group {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.result-set-tab-group .tab-btn {
+    padding: 4px 10px;
+    font-size: 11px;
+}
+
+.result-set-tab-group .tab-status {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 3px;
+    vertical-align: middle;
+}
+
+.result-set-tab-group .tab-status.success {
+    background: var(--success-color);
+}
+
+.result-set-tab-group .tab-status.error {
+    background: var(--error-color);
+}
+
+.result-set-tab-group .tab-summary {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-left: 2px;
+    font-weight: 400;
+}
+
 .tb-btn.edit-mode-active {
     background: var(--accent-dim);
     color: var(--accent);

@@ -69,34 +69,27 @@ export function registerMaterializedViewDesignerCommands(
                         return;
                     }
 
-                    const confirmed = await vscode.window.showWarningMessage(
-                        `Are you sure you want to drop materialized view "${node.mvName}"?`,
-                        { modal: true },
-                        'Drop',
-                        'Cancel',
-                    );
-
-                    if (confirmed !== 'Drop') {
-                        return;
-                    }
-
                     const activeConn = connectionService.getActiveConnection();
                     if (!activeConn) {
                         vscode.window.showErrorMessage('No active connection');
                         return;
                     }
 
-                    const adapter = connectionService.getAdapter(activeConn.id);
-                    if (!adapter) {
-                        vscode.window.showErrorMessage('No adapter found for connection');
-                        return;
-                    }
-
                     const sql = `DROP MATERIALIZED VIEW \`${node.databaseName}\`.\`${node.mvName}\``;
-                    await adapter.queryAdapter.execute(sql);
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelCallbacks',
+                        activeConn.id,
+                        node.databaseName,
+                    );
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelSql',
+                        sql,
+                        true,
+                    );
 
                     schemaService.invalidate(activeConn.id, 'materializedView', node.databaseName);
-                    vscode.window.showInformationMessage(`Materialized view "${node.mvName}" dropped successfully`);
                 } catch (error) {
                     handleError(error, 'dropMaterializedView', ErrorCategory.SUB_ITEM);
                     vscode.window.showErrorMessage(`Failed to drop materialized view: ${error}`);
@@ -121,16 +114,19 @@ export function registerMaterializedViewDesignerCommands(
                         return;
                     }
 
-                    const adapter = connectionService.getAdapter(activeConn.id);
-                    if (!adapter) {
-                        vscode.window.showErrorMessage('No adapter found for connection');
-                        return;
-                    }
-
                     const sql = `REFRESH MATERIALIZED VIEW \`${node.databaseName}\`.\`${node.mvName}\``;
-                    await adapter.queryAdapter.execute(sql);
 
-                    vscode.window.showInformationMessage(`Materialized view "${node.mvName}" refresh initiated`);
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelCallbacks',
+                        activeConn.id,
+                        node.databaseName,
+                    );
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelSql',
+                        sql,
+                        true,
+                    );
                 } catch (error) {
                     handleError(error, 'refreshMaterializedView', ErrorCategory.SUB_ITEM);
                     vscode.window.showErrorMessage(`Failed to refresh materialized view: ${error}`);
@@ -174,6 +170,84 @@ export function registerMaterializedViewDesignerCommands(
                 } catch (error) {
                     handleError(error, 'viewMaterializedViewDDL', ErrorCategory.SUB_ITEM);
                     vscode.window.showErrorMessage(`Failed to get materialized view DDL: ${error}`);
+                }
+            },
+        ),
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand(
+            'sqlAllInOne.setMaterializedViewActive',
+            async (node?: MaterializedViewTreeNode) => {
+                try {
+                    if (!node) {
+                        vscode.window.showErrorMessage('No materialized view selected');
+                        return;
+                    }
+
+                    const activeConn = connectionService.getActiveConnection();
+                    if (!activeConn) {
+                        vscode.window.showErrorMessage('No active connection');
+                        return;
+                    }
+
+                    const sql = `ALTER MATERIALIZED VIEW \`${node.databaseName}\`.\`${node.mvName}\` ACTIVE`;
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelCallbacks',
+                        activeConn.id,
+                        node.databaseName,
+                    );
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelSql',
+                        sql,
+                        true,
+                    );
+
+                    schemaService.invalidate(activeConn.id, 'materializedView', node.databaseName);
+                } catch (error) {
+                    handleError(error, 'setMaterializedViewActive', ErrorCategory.SUB_ITEM);
+                    vscode.window.showErrorMessage(`Failed to activate materialized view: ${error}`);
+                }
+            },
+        ),
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand(
+            'sqlAllInOne.setMaterializedViewInactive',
+            async (node?: MaterializedViewTreeNode) => {
+                try {
+                    if (!node) {
+                        vscode.window.showErrorMessage('No materialized view selected');
+                        return;
+                    }
+
+                    const activeConn = connectionService.getActiveConnection();
+                    if (!activeConn) {
+                        vscode.window.showErrorMessage('No active connection');
+                        return;
+                    }
+
+                    const sql = `ALTER MATERIALIZED VIEW \`${node.databaseName}\`.\`${node.mvName}\` INACTIVE`;
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelCallbacks',
+                        activeConn.id,
+                        node.databaseName,
+                    );
+
+                    await vscode.commands.executeCommand(
+                        'hive-formatter.setQueryResultPanelSql',
+                        sql,
+                        true,
+                    );
+
+                    schemaService.invalidate(activeConn.id, 'materializedView', node.databaseName);
+                } catch (error) {
+                    handleError(error, 'setMaterializedViewInactive', ErrorCategory.SUB_ITEM);
+                    vscode.window.showErrorMessage(`Failed to deactivate materialized view: ${error}`);
                 }
             },
         ),

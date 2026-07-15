@@ -451,6 +451,7 @@
     "database.noQueryResult": "没有可导出的查询结果。",
     "database.selectConnection": "请先选择一个连接",
     "database.columnCopied": "列名已复制到剪贴板",
+    "database.objectNameCopied": "对象名称已复制到剪贴板",
     "database.addedToFavorites": "已添加到收藏",
     "database.removedFromFavorites": "已从收藏中移除",
     "database.noQueryHistory": "没有查询历史",

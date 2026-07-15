@@ -213,6 +213,69 @@ export class SqlStatementDetector {
         return statements;
     }
 
+    /**
+     * Split a raw SQL string into individual statements by semicolons,
+     * respecting quoted strings. Returns non-empty trimmed statements.
+     * Does NOT require a TextDocument — works on plain text.
+     */
+    static splitStatements(sql: string): string[] {
+        const text = sql.trim();
+        if (!text) return [];
+
+        let inSingleQuote = false;
+        let inDoubleQuote = false;
+        let inBacktick = false;
+        const offsets: number[] = [0];
+
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+
+            if (inSingleQuote) {
+                if (ch === "'") {
+                    if (i + 1 < text.length && text[i + 1] === "'") {
+                        i++;
+                    } else {
+                        inSingleQuote = false;
+                    }
+                } else if (ch === '\\') {
+                    i++;
+                }
+            } else if (inDoubleQuote) {
+                if (ch === '"') {
+                    inDoubleQuote = false;
+                } else if (ch === '\\') {
+                    i++;
+                }
+            } else if (inBacktick) {
+                if (ch === '`') {
+                    inBacktick = false;
+                }
+            } else if (ch === "'") {
+                inSingleQuote = true;
+            } else if (ch === '"') {
+                inDoubleQuote = true;
+            } else if (ch === '`') {
+                inBacktick = true;
+            } else if (ch === ';') {
+                offsets.push(i + 1);
+            }
+        }
+
+        offsets.push(text.length);
+
+        const statements: string[] = [];
+        for (let i = 0; i < offsets.length - 1; i++) {
+            const startOffset = offsets[i];
+            const endOffset = offsets[i + 1] - (i < offsets.length - 2 ? 1 : 0);
+            const stmt = text.substring(startOffset, endOffset).trim();
+            if (stmt) {
+                statements.push(stmt);
+            }
+        }
+
+        return statements;
+    }
+
     private detectStatementType(sql: string): StatementType {
         const keyword = sql.trim().split(/\s+/)[0].toUpperCase();
         return statementTypeMap[keyword] || 'OTHER';

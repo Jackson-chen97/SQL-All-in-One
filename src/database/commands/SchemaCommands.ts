@@ -559,6 +559,15 @@ export function registerSchemaCommands(
     );
 
     disposables.push(
+        vscode.commands.registerCommand('hive-formatter.copyObjectName', async (node?: ITreeNode) => {
+            if (node) {
+                await vscode.env.clipboard.writeText(node.label);
+                vscode.window.showInformationMessage(t('database.objectNameCopied'));
+            }
+        })
+    );
+
+    disposables.push(
         vscode.commands.registerCommand('hive-formatter.addToFavorites', async (node?: ITreeNode) => {
             if (node) {
                 const connectionId = getNodeField(node, 'connectionId');

@@ -451,6 +451,7 @@
     "database.noQueryResult": "No query result to export.",
     "database.selectConnection": "Select a connection first",
     "database.columnCopied": "Column name copied to clipboard",
+    "database.objectNameCopied": "Object name copied to clipboard",
     "database.addedToFavorites": "Added to favorites",
     "database.removedFromFavorites": "Removed from favorites",
     "database.noQueryHistory": "No query history",

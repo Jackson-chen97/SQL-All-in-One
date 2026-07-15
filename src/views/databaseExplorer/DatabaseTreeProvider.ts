@@ -652,6 +652,7 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
 
                 case 'materializedViews':
                     const mvs = await this.schemaCache.getMaterializedViews(parent.connectionId, parent.databaseName);
+                    mvs.sort((a, b) => a.name.localeCompare(b.name));
                     for (const mv of mvs) {
                         children.push(new MaterializedViewTreeNode(
                             mv.name,

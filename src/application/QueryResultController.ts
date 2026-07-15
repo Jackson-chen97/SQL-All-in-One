@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { IConnectionService, IQueryService, IDataEditService, QueryExecutionResult } from './ports';
 import type { FilterCondition, PendingChange, ForeignKeyOption } from '../shared/editTypes';
+import { SqlStatementDetector } from '../database/query/SqlStatementDetector';
 import { t } from '../i18n/index';
 import { handleError, ErrorCategory } from '../core/errorHandler';
 
@@ -35,6 +36,7 @@ export interface IQueryResultPanel {
     // Methods the controller calls on the panel.
     showLoading(sql: string): void;
     showResult(result: QueryExecutionResult, connectionName?: string, connectionColor?: string): void;
+    showMultipleResults(results: QueryExecutionResult[], connectionName?: string, connectionColor?: string, sqls?: string[]): void;
     showError(error: { code: string; message: string; sql?: string }): void;
     getCurrentResult(): { columns: { name: string }[]; rows: Record<string, unknown>[] } | undefined;
     sendDatabaseList(databases: string[], current: string): void;
@@ -173,22 +175,48 @@ export class QueryResultController {
                 }
 
                 panel.showLoading(sql);
-                const result = await this.queryService.execute(adapterId, sql, {
-                    database: this.database,
-                });
+
+                const statements = SqlStatementDetector.splitStatements(sql);
+
+                // Single statement: use the original single-result path
+                if (statements.length <= 1) {
+                    const result = await this.queryService.execute(adapterId, sql, {
+                        database: this.database,
+                    });
+
+                    if (panel.isDisposed) return;
+
+                    if (result.status === 'error') {
+                        panel.showError(
+                            result.error ?? { code: 'EXEC_ERROR', message: t('database.unknownError'), sql },
+                        );
+                    } else {
+                        const conn = this.connectionId
+                            ? this.connectionService.getConnection(this.connectionId)
+                            : this.connectionService.getActiveConnection();
+                        panel.showResult(result, conn?.name, conn?.color);
+                    }
+                    return;
+                }
+
+                // Multiple statements: execute each and collect results
+                const results: QueryExecutionResult[] = [];
+                for (const stmt of statements) {
+                    if (panel.isDisposed) return;
+                    const result = await this.queryService.execute(adapterId, stmt, {
+                        database: this.database,
+                    });
+                    results.push(result);
+                    // Stop on first error to avoid cascading failures
+                    if (result.status === 'error') break;
+                }
 
                 if (panel.isDisposed) return;
 
-                if (result.status === 'error') {
-                    panel.showError(
-                        result.error ?? { code: 'EXEC_ERROR', message: t('database.unknownError'), sql },
-                    );
-                } else {
-                    const conn = this.connectionId
-                        ? this.connectionService.getConnection(this.connectionId)
-                        : this.connectionService.getActiveConnection();
-                    panel.showResult(result, conn?.name, conn?.color);
-                }
+                const conn = this.connectionId
+                    ? this.connectionService.getConnection(this.connectionId)
+                    : this.connectionService.getActiveConnection();
+                panel.showMultipleResults(results, conn?.name, conn?.color, statements);
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 if (panel.isDisposed) return;

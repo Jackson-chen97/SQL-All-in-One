@@ -215,6 +215,9 @@ const state = {
     dialect: 'mysql',
     availableDatabases: [],
     currentDatabase: '',
+    resultSets: [],
+    activeResultSetIndex: 0,
+    totalResultSets: 0,
 };
 
 var monacoEditor = null;
@@ -601,6 +604,19 @@ function getEditorSql() {
     return state.currentSql || '';
 }
 
+function getSelectedSql() {
+    if (monacoEditor) {
+        var selection = monacoEditor.getSelection();
+        if (selection && !selection.isEmpty()) {
+            var selectedText = monacoEditor.getModel().getValueInRange(selection);
+            if (selectedText && selectedText.trim()) {
+                return selectedText.trim();
+            }
+        }
+    }
+    return null;
+}
+
 function setEditorSql(sql) {
     if (monacoEditor) {
         var fullRange = monacoEditor.getModel().getFullModelRange();
@@ -651,7 +667,7 @@ function initSplitter() {
 }
 
 function executePanelSql() {
-    var sql = getEditorSql().trim();
+    var sql = getSelectedSql() || getEditorSql().trim();
     if (!sql) return;
     state.currentSql = sql;
     vscode.postMessage({ command: 'executePanelSql', sql: sql });
@@ -823,6 +839,9 @@ function handleMessage(event) {
         case 'databaseList':
             handleDatabaseList(message.data);
             break;
+        case 'multipleResults':
+            handleMultipleResults(message.data);
+            break;
     }
 }
 
@@ -848,6 +867,19 @@ function handleQueryResult(data) {
     state.validationErrors = {};
     state.editingCell = null;
     state.formCurrentIndex = 0;
+
+    // Reset multi-result state for single results
+    state.resultSets = [];
+    state.totalResultSets = 0;
+    state.activeResultSetIndex = 0;
+    // Restore the original "结果集" tab
+    var tabBar = document.getElementById('tabBar');
+    if (tabBar) {
+        var originalTab = tabBar.querySelector('[data-tab="pageResult"]');
+        if (originalTab) originalTab.style.display = '';
+        var group = tabBar.querySelector('.result-set-tab-group');
+        if (group) group.innerHTML = '';
+    }
 
     var commitDialogEl = document.getElementById('commitDialog');
     if (commitDialogEl) commitDialogEl.style.display = 'none';
@@ -891,6 +923,7 @@ var _batchedResult = null;
 
 function handleQueryResultStart(data) {
     _batchedResult = {
+        resultIndex: data.resultIndex,
         columns: data.columns || [],
         rows: [],
         rowCount: data.rowCount || 0,
@@ -909,6 +942,9 @@ function handleQueryResultStart(data) {
 
 function handleQueryResultBatch(data) {
     if (!_batchedResult) return;
+    if (data.resultIndex !== undefined) {
+        _batchedResult.resultIndex = data.resultIndex;
+    }
     var batchRows = data.rows || [];
     if (batchRows.length > 0) {
         _batchedResult.rows.push.apply(_batchedResult.rows, batchRows);
@@ -918,6 +954,28 @@ function handleQueryResultBatch(data) {
 
 function handleQueryResultEnd(data) {
     if (!_batchedResult) return;
+
+    // If this is part of a multi-result batch, store in the result set array
+    if (data.resultIndex !== undefined && state.resultSets[data.resultIndex]) {
+        var rs = state.resultSets[data.resultIndex];
+        rs.rows = _batchedResult.rows;
+        rs.rowCount = _batchedResult.rowCount;
+        rs.affectedRows = _batchedResult.affectedRows;
+        rs.executionTime = _batchedResult.executionTime;
+        rs.error = _batchedResult.error;
+        rs.status = _batchedResult.status;
+        rs.connectionName = _batchedResult.connectionName || rs.connectionName;
+        rs.originalRows = rs.rows.map(function(row) { return row.slice(); });
+        _batchedResult = null;
+
+        // Update tabs if we're showing the active result
+        if (data.resultIndex === state.activeResultSetIndex) {
+            _showResultSet(data.resultIndex);
+        }
+        renderResultSetTabs();
+        return;
+    }
+
     handleQueryResult(_batchedResult);
     _batchedResult = null;
 }
@@ -1091,7 +1149,12 @@ function renderVisibleRows() {
                             td.className = 'cell-blob';
                             td.textContent = '[BLOB]';
                         } else {
-                            var display = String(val);
+                            var display;
+                            if (isDateType(colType) || isDateValue(val)) {
+                                display = formatDateValue(val, state.dateFormat);
+                            } else {
+                                display = String(val);
+                            }
                             if (display.length > state.longTextThreshold) {
                                 display = display.substring(0, state.longTextThreshold) + '...';
                             }
@@ -1580,6 +1643,66 @@ function formatNumber(num) {
 
 function isBlobType(type) {
     return !!type && (type.includes('BLOB') || type.includes('BINARY') || type.includes('VARBINARY'));
+}
+
+function isDateType(type) {
+    return !!type && /DATE|TIME|TIMESTAMP|YEAR/i.test(type);
+}
+
+function isDateValue(val) {
+    if (val instanceof Date) return true;
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}(T|\s)/.test(val)) return true;
+    return false;
+}
+
+function parseDateValue(val) {
+    if (val instanceof Date) return val;
+    if (typeof val === 'string') {
+        var d = new Date(val);
+        if (!isNaN(d.getTime())) return d;
+    }
+    return null;
+}
+
+function padZero(n) {
+    return n < 10 ? '0' + n : '' + n;
+}
+
+function formatDateValue(val, format) {
+    if (val === null || val === undefined) return String(val);
+    if (!isDateValue(val)) return String(val);
+
+    var date = parseDateValue(val);
+    if (!date) return String(val);
+
+    if (!format || format === 'local') {
+        var y = date.getFullYear();
+        var m = padZero(date.getMonth() + 1);
+        var d = padZero(date.getDate());
+        var hh = padZero(date.getHours());
+        var mm = padZero(date.getMinutes());
+        var ss = padZero(date.getSeconds());
+        return y + '-' + m + '-' + d + ' ' + hh + ':' + mm + ':' + ss;
+    } else if (format === 'utc') {
+        var uy = date.getUTCFullYear();
+        var um = padZero(date.getUTCMonth() + 1);
+        var ud = padZero(date.getUTCDate());
+        var uh = padZero(date.getUTCHours());
+        var umm = padZero(date.getUTCMinutes());
+        var us = padZero(date.getUTCSeconds());
+        return uy + '-' + um + '-' + ud + ' ' + uh + ':' + umm + ':' + us;
+    } else if (format === 'relative') {
+        var now = Date.now();
+        var diff = now - date.getTime();
+        var absDiff = Math.abs(diff);
+        var suffix = diff > 0 ? ' ago' : ' from now';
+        if (absDiff < 60000) return 'just now';
+        if (absDiff < 3600000) return Math.floor(absDiff / 60000) + ' min' + suffix;
+        if (absDiff < 86400000) return Math.floor(absDiff / 3600000) + ' hr' + suffix;
+        if (absDiff < 2592000000) return Math.floor(absDiff / 86400000) + ' day' + suffix;
+        return date.toLocaleString();
+    }
+    return String(val);
 }
 
 function renderCellEditor(td, val, col, rowIdx, colIdx) {
@@ -2187,7 +2310,14 @@ function renderFormView() {
         } else {
             var input = document.createElement('input');
             input.type = 'text';
-            input.value = val === null || val === undefined ? '' : String(val);
+            var colTypeUpper = (col.type || '').toUpperCase();
+            if (val === null || val === undefined) {
+                input.value = '';
+            } else if (isDateType(colTypeUpper) || isDateValue(val)) {
+                input.value = formatDateValue(val, state.dateFormat);
+            } else {
+                input.value = String(val);
+            }
             if (val === null || val === undefined) input.classList.add('field-null');
             if (state.editMode) {
                 (function(ci, c) {
@@ -2421,6 +2551,168 @@ function handleDatabaseList(data) {
     state.availableDatabases = data.databases || [];
     state.currentDatabase = data.currentDatabase || '';
     renderDatabaseSelector();
+}
+
+function handleMultipleResults(data) {
+    var results = data.results || [];
+    state.totalResultSets = results.length;
+    state.resultSets = [];
+    state.activeResultSetIndex = 0;
+
+    for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        state.resultSets.push({
+            columns: r.columns || [],
+            rows: [],
+            rowCount: r.rowCount || 0,
+            affectedRows: r.affectedRows || 0,
+            executionTime: r.executionTime || 0,
+            error: r.error || null,
+            database: r.database || '',
+            connectionName: r.connectionName || '',
+            status: r.status === 'error' ? 'error' : 'success',
+            tableName: r.tableName || '',
+            pendingChanges: [],
+            originalRows: [],
+            editingCell: null,
+            sortColumn: null,
+            sortDirection: null,
+            selectedCell: null,
+            currentPage: 1,
+            sql: r.sql || '',
+            queryId: r.queryId || null,
+        });
+    }
+
+    renderResultSetTabs();
+
+    // Show the first result
+    if (state.resultSets.length > 0) {
+        _showResultSet(0);
+    }
+}
+
+function renderResultSetTabs() {
+    var tabBar = document.getElementById('tabBar');
+    if (!tabBar) return;
+
+    // Find or create the result set tab container
+    var resultTabContainer = tabBar.querySelector('.result-set-tab-group');
+    if (!resultTabContainer) {
+        resultTabContainer = document.createElement('span');
+        resultTabContainer.className = 'result-set-tab-group';
+    }
+
+    // Remove old result set tabs
+    resultTabContainer.innerHTML = '';
+
+    if (state.totalResultSets <= 1) {
+        // Single result: show the original "结果集" tab
+        resultTabContainer.style.display = 'none';
+        var originalTab = tabBar.querySelector('[data-tab="pageResult"]');
+        if (originalTab) originalTab.style.display = '';
+        return;
+    }
+
+    // Hide the original "结果集" tab
+    var originalTab = tabBar.querySelector('[data-tab="pageResult"]');
+    if (originalTab) originalTab.style.display = 'none';
+
+    // Add result set tabs
+    for (var i = 0; i < state.resultSets.length; i++) {
+        var rs = state.resultSets[i];
+        var tab = document.createElement('button');
+        tab.className = 'tab-btn' + (i === state.activeResultSetIndex ? ' active' : '');
+        tab.setAttribute('data-result-index', i);
+        tab.setAttribute('data-tab', 'pageResult');
+
+        var statusDot = document.createElement('span');
+        statusDot.className = 'tab-status ' + (rs.status === 'error' ? 'error' : 'success');
+        tab.appendChild(statusDot);
+
+        var label = document.createElement('span');
+        label.textContent = t('resultPanel.resultSet') + ' ' + (i + 1);
+        tab.appendChild(label);
+
+        var summary = document.createElement('span');
+        summary.className = 'tab-summary';
+        if (rs.status === 'error') {
+            summary.textContent = ' ✕';
+        } else if (rs.affectedRows > 0) {
+            summary.textContent = ' ' + rs.affectedRows;
+        } else {
+            summary.textContent = ' ' + (rs.rowCount || 0);
+        }
+        tab.appendChild(summary);
+
+        (function(index) {
+            tab.addEventListener('click', function() {
+                switchResultSet(index);
+                // Also switch to the result page
+                switchTab('pageResult');
+            });
+        })(i);
+
+        resultTabContainer.appendChild(tab);
+    }
+
+    resultTabContainer.style.display = 'flex';
+
+    // Insert result set tabs before the "消息" tab
+    var messagesTab = tabBar.querySelector('[data-tab="pageMessages"]');
+    if (messagesTab && !resultTabContainer.parentNode) {
+        tabBar.insertBefore(resultTabContainer, messagesTab);
+    }
+}
+
+function switchResultSet(index) {
+    if (index < 0 || index >= state.resultSets.length) return;
+    state.activeResultSetIndex = index;
+    renderResultSetTabs();
+    _showResultSet(index);
+}
+
+function _showResultSet(index) {
+    var rs = state.resultSets[index];
+    if (!rs) return;
+
+    // Update main state from the active result set
+    state.columns = rs.columns;
+    state.rows = rs.rows;
+    state.rowCount = rs.rowCount;
+    state.affectedRows = rs.affectedRows;
+    state.executionTime = rs.executionTime;
+    state.error = rs.error;
+    state.database = rs.database;
+    state.connectionName = rs.connectionName;
+    state.status = rs.status;
+    state.tableName = rs.tableName;
+    state.currentPage = rs.currentPage || 1;
+    state.sortColumn = rs.sortColumn;
+    state.sortDirection = rs.sortDirection;
+    state.selectedCell = rs.selectedCell;
+    state.editingCell = rs.editingCell;
+    state.pendingChanges = rs.pendingChanges || [];
+    state.originalRows = rs.originalRows || [];
+    _pendingChangeMap = {};
+    for (var i = 0; i < state.pendingChanges.length; i++) {
+        _pendingChangeMap[state.pendingChanges[i].rowIndex] = state.pendingChanges[i];
+    }
+    state.validationErrors = {};
+    state.formCurrentIndex = 0;
+
+    addMessage(
+        rs.error ? 'error' : 'success',
+        (rs.error
+            ? t('resultPanel.queryFailed') + ': ' + (rs.error.message || '')
+            : t('resultPanel.queryCompleted') + ' - ' + rs.rowCount + ' ' + t('resultPanel.rows') + ', ' + formatTime(rs.executionTime)
+        ) + (state.totalResultSets > 1 ? ' [' + t('resultPanel.resultSet') + ' ' + (index + 1) + ']' : '')
+    );
+
+    renderGrid();
+    updateHeader();
+    updateStatusBar();
+    updateEmptyState();
 }
 
 function renderDatabaseSelector() {

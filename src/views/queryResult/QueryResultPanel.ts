@@ -484,6 +484,145 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
         });
     }
 
+    public showMultipleResults(
+        results: QueryResult[],
+        connectionName?: string,
+        connectionColor?: string,
+        sqls?: string[],
+    ): void {
+        try {
+            const activeConn = this._connectionService.getActiveConnection();
+            if (activeConn) {
+                const newDialect = activeConn.dialect || 'mysql';
+                if (newDialect !== this._currentDialect) {
+                    this._currentDialect = newDialect;
+                    this._sendLanguageData();
+                }
+            }
+        } catch (e) { /* ignore: dialect detection is best-effort */ handleError(e, 'QueryResultPanel.dialectDetection', ErrorCategory.SUB_ITEM) }
+
+        // Set the first result as the current result for backward compat
+        if (results.length > 0) {
+            this._currentResult = results[0];
+        }
+
+        const BATCH_SIZE = 1000;
+
+        // Build metadata for each result
+        const metadataResults = results.map((result, index) => {
+            const resultRows = result.rows || [];
+            const totalRows = resultRows.length;
+            const isLargeResultSet = totalRows > 100000;
+
+            const metadata = {
+                resultIndex: index,
+                queryId: result.queryId,
+                status: result.status,
+                columns: result.columns.map((c) => ({
+                    name: c.name,
+                    type: c.type,
+                    nullable: c.nullable,
+                    isPrimaryKey: c.isPrimaryKey,
+                    isAutoIncrement: c.isAutoIncrement,
+                    isEnum: c.isEnum,
+                    enumValues: c.enumValues,
+                    referencedTable: c.referencedTable,
+                    comment: c.comment,
+                })),
+                rowCount: result.rowCount,
+                affectedRows: result.affectedRows,
+                executionTime: result.executionTime,
+                error: result.error,
+                database: result.database,
+                connectionName: connectionName || '',
+                connectionColor: connectionColor || '',
+                tableName: '',
+                largeResultSet: isLargeResultSet,
+                sql: sqls?.[index] || '',
+            };
+
+            // Send row batches for this result
+            const rows = resultRows;
+            const colNames = result.columns.map((c) => c.name);
+            const colCount = colNames.length;
+            const totalBatches = Math.ceil(totalRows / BATCH_SIZE);
+            const batchData: unknown[][][] = [];
+
+            for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+                const start = batchIndex * BATCH_SIZE;
+                const end = Math.min(start + BATCH_SIZE, totalRows);
+                const batchRows: unknown[][] = new Array<unknown[]>(end - start);
+
+                for (let i = start; i < end; i++) {
+                    const row = rows[i];
+                    const values = new Array(colCount);
+                    for (let j = 0; j < colCount; j++) {
+                        values[j] = row[colNames[j]];
+                    }
+                    batchRows[i - start] = values;
+                    if (isLargeResultSet && i >= 1000) {
+                        rows[i] = undefined as unknown as QueryRow;
+                    }
+                }
+                batchData.push(batchRows);
+            }
+
+            if (isLargeResultSet) {
+                resultRows.length = 1000;
+                result.rows = resultRows;
+            }
+
+            return { metadata, batchData };
+        });
+
+        this.postMessage({
+            type: 'multipleResults',
+            data: {
+                results: metadataResults.map((r) => r.metadata),
+                connectionName: connectionName || '',
+                connectionColor: connectionColor || '',
+            },
+        });
+
+        // Send batches for each result — each result needs a queryResultStart
+        // to initialize the webview's _batchedResult accumulator.
+        for (const { metadata: meta, batchData } of metadataResults) {
+            this.postMessage({
+                type: 'queryResultStart',
+                data: {
+                    resultIndex: meta.resultIndex,
+                    queryId: meta.queryId,
+                    status: meta.status,
+                    columns: meta.columns,
+                    rowCount: meta.rowCount,
+                    affectedRows: meta.affectedRows,
+                    executionTime: meta.executionTime,
+                    error: meta.error,
+                    database: meta.database,
+                    connectionName: meta.connectionName,
+                    connectionColor: meta.connectionColor,
+                    tableName: meta.tableName,
+                    largeResultSet: meta.largeResultSet,
+                },
+            });
+            for (let i = 0; i < batchData.length; i++) {
+                this.postMessage({
+                    type: 'queryResultBatch',
+                    data: {
+                        resultIndex: meta.resultIndex,
+                        batchIndex: i,
+                        totalBatches: batchData.length,
+                        rows: batchData[i],
+                    },
+                });
+            }
+            this.postMessage({
+                type: 'queryResultEnd',
+                data: { resultIndex: meta.resultIndex, queryId: meta.queryId },
+            });
+        }
+    }
+
     public showLoading(sql: string): void {
         this.postMessage({
             type: 'queryStart',

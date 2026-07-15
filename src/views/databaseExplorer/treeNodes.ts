@@ -299,13 +299,13 @@ export class MaterializedViewTreeNode extends BaseTreeNode {
     readonly type: TreeNodeType = 'materializedView';
     readonly id: string;
     readonly label: string;
-    readonly contextValue?: string = 'materializedView';
+    readonly contextValue?: string;
     readonly mvName: string;
     readonly connectionId: string;
     readonly databaseName: string;
     readonly comment?: string;
     readonly status?: string;
-    
+
     constructor(
         mvName: string,
         connectionId: string,
@@ -323,7 +323,7 @@ export class MaterializedViewTreeNode extends BaseTreeNode {
             parent,
             tooltip: comment ? `${t('explorer.materializedView', mvName)}\n${comment}` : t('explorer.materializedView', mvName)
         });
-        
+
         this.mvName = mvName;
         this.connectionId = connectionId;
         this.databaseName = databaseName;
@@ -331,6 +331,7 @@ export class MaterializedViewTreeNode extends BaseTreeNode {
         this.id = `mv-${connectionId}-${databaseName}-${mvName}`;
         this.comment = comment;
         this.status = status;
+        this.contextValue = isInactive ? 'materializedViewInactive' : 'materializedViewActive';
     }
 }
 

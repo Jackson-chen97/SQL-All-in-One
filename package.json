@@ -78,6 +78,7 @@
         "onCommand:hive-formatter.viewTriggerDDL",
         "onCommand:hive-formatter.newQuery",
         "onCommand:hive-formatter.copyColumnName",
+        "onCommand:hive-formatter.copyObjectName",
         "onCommand:hive-formatter.addToFavorites",
         "onCommand:hive-formatter.removeFromFavorites",
         "onCommand:hive-formatter.revealInExplorer",
@@ -454,6 +455,10 @@
                 "title": "%hive-formatter.command.copyColumnName.title%"
             },
             {
+                "command": "hive-formatter.copyObjectName",
+                "title": "%hive-formatter.command.copyObjectName.title%"
+            },
+            {
                 "command": "hive-formatter.addToFavorites",
                 "title": "%hive-formatter.command.addToFavorites.title%"
             },
@@ -532,6 +537,14 @@
             {
                 "command": "sqlAllInOne.viewMaterializedViewDDL",
                 "title": "%sqlAllInOne.command.viewMaterializedViewDDL.title%"
+            },
+            {
+                "command": "sqlAllInOne.setMaterializedViewActive",
+                "title": "%sqlAllInOne.command.setMaterializedViewActive.title%"
+            },
+            {
+                "command": "sqlAllInOne.setMaterializedViewInactive",
+                "title": "%sqlAllInOne.command.setMaterializedViewInactive.title%"
             },
             {
                 "command": "hive-formatter.explainQuery",
@@ -2010,27 +2023,37 @@
                 },
                 {
                     "command": "hive-formatter.viewTableData",
-                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedView",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /materializedView/",
                     "group": "3_table@1"
                 },
                 {
                     "command": "hive-formatter.viewMaterializedViewDDL",
-                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedView",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /materializedView/",
                     "group": "3_table@2"
                 },
                 {
                     "command": "sqlAllInOne.editMaterializedView",
-                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedView",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /materializedView/",
                     "group": "3_table@3"
                 },
                 {
                     "command": "sqlAllInOne.refreshMaterializedView",
-                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedView",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /materializedView/",
                     "group": "3_table@4"
                 },
                 {
+                    "command": "sqlAllInOne.setMaterializedViewActive",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedViewInactive",
+                    "group": "3_table@5"
+                },
+                {
+                    "command": "sqlAllInOne.setMaterializedViewInactive",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedViewActive",
+                    "group": "3_table@5"
+                },
+                {
                     "command": "sqlAllInOne.dropMaterializedView",
-                    "when": "view == hive-formatter.databaseExplorer && viewItem == materializedView",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /materializedView/",
                     "group": "4_danger@1"
                 },
                 {
@@ -2072,6 +2095,11 @@
                     "command": "hive-formatter.copyColumnName",
                     "when": "view == hive-formatter.databaseExplorer && viewItem == column",
                     "group": "6_column@1"
+                },
+                {
+                    "command": "hive-formatter.copyObjectName",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /^(table|view|materializedViewActive|materializedViewInactive|function|procedure|trigger|connectionConnected|connectionDisconnected|connectionError|database|index)$/",
+                    "group": "9_copyName@1"
                 },
                 {
                     "command": "hive-formatter.setDefaultDatabase",
