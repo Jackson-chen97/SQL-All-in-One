@@ -100,7 +100,8 @@
         "onCommand:hive-formatter.exportConnections",
         "onCommand:hive-formatter.importConnections",
         "onCommand:hive-formatter.selectDatabases",
-        "onCommand:hive-formatter.filterObjectGroup"
+        "onCommand:hive-formatter.filterObjectGroup",
+        "onCommand:hive-formatter.filterTableColumns"
     ],
     "extensionKind": [
         "workspace"
@@ -574,6 +575,11 @@
             {
                 "command": "hive-formatter.filterObjectGroup",
                 "title": "%hive-formatter.command.filterObjectGroup.title%",
+                "icon": "$(filter)"
+            },
+            {
+                "command": "hive-formatter.filterTableColumns",
+                "title": "%hive-formatter.command.filterTableColumns.title%",
                 "icon": "$(filter)"
             }
         ],
@@ -2124,6 +2130,11 @@
                 {
                     "command": "hive-formatter.filterObjectGroup",
                     "when": "view == hive-formatter.databaseExplorer && viewItem == objectGroup",
+                    "group": "inline"
+                },
+                {
+                    "command": "hive-formatter.filterTableColumns",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem == table",
                     "group": "inline"
                 }
             ]

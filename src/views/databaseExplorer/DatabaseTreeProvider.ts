@@ -69,6 +69,10 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
     private objectGroupFilters: Map<string, string> = new Map();
     /** Cached filtered child count for display purposes */
     private objectGroupFilteredCounts: Map<string, number> = new Map();
+    /** Per-table column keyword filter. Key = TableTreeNode.id */
+    private tableColumnFilters: Map<string, string> = new Map();
+    /** Cached filtered column count for display purposes */
+    private tableColumnFilteredCounts: Map<string, number> = new Map();
 
     private _disposables: vscode.Disposable[] = [];
 
@@ -258,6 +262,30 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
     }
 
     /**
+     * Prompt the user for a keyword to filter columns inside a table node.
+     * Pass an empty string or cancel to clear the filter.
+     */
+    async filterTableColumns(node: TableTreeNode): Promise<void> {
+        const currentFilter = this.tableColumnFilters.get(node.id) || '';
+        const keyword = await vscode.window.showInputBox({
+            prompt: t('explorer.filterTableColumns.prompt', node.tableName),
+            placeHolder: t('explorer.filterTableColumns.placeholder'),
+            value: currentFilter,
+            ignoreFocusOut: true
+        });
+
+        if (keyword !== undefined) {
+            if (keyword.trim()) {
+                this.tableColumnFilters.set(node.id, keyword.trim());
+            } else {
+                this.tableColumnFilters.delete(node.id);
+                this.tableColumnFilteredCounts.delete(node.id);
+            }
+            this.refresh(node);
+        }
+    }
+
+    /**
      * Get the set of selected database names for a connection, or undefined (show all).
      */
     getSelectedDatabases(connectionId: string): Set<string> | undefined {
@@ -295,6 +323,19 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
                     ? `${filteredCount}/${element.count}`
                     : String(element.count);
                 item.description = `(${countDisplay}) ${t('explorer.filtered')}: ${filterKeyword}`;
+            }
+        }
+
+        // Override description for table nodes with active column filter
+        if (element instanceof TableTreeNode) {
+            const filterKeyword = this.tableColumnFilters.get(element.id);
+            if (filterKeyword) {
+                const filteredCount = this.tableColumnFilteredCounts.get(element.id);
+                const rowCountDisplay = element.rowCount !== undefined ? ` ${t('explorer.rows', String(element.rowCount))}` : '';
+                const filterDisplay = filteredCount !== undefined
+                    ? ` (${filteredCount} ${t('explorer.filtered')})`
+                    : '';
+                item.description = `${rowCountDisplay}${filterDisplay} ${t('explorer.filtered')}: ${filterKeyword}`.trim();
             }
         }
 
@@ -767,6 +808,23 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
             } catch (e) {
                 // Index info is optional, columns are already loaded from cache
                 handleError(e, 'DatabaseTreeProvider.getTableChildren.indexInfo', ErrorCategory.SUB_ITEM)
+            }
+
+            // Apply column keyword filter if set
+            const filterKeyword = this.tableColumnFilters.get(parent.id);
+            if (filterKeyword) {
+                const lowerKeyword = filterKeyword.toLowerCase();
+                const columnChildren = children.filter(child =>
+                    child instanceof ColumnTreeNode &&
+                    child.label.toLowerCase().includes(lowerKeyword)
+                );
+                this.tableColumnFilteredCounts.set(parent.id, columnChildren.length);
+                // Keep only filtered columns + all index nodes
+                const indexChildren = children.filter(child => !(child instanceof ColumnTreeNode));
+                children.length = 0;
+                children.push(...columnChildren, ...indexChildren);
+            } else {
+                this.tableColumnFilteredCounts.delete(parent.id);
             }
 
             this.nodeCache.set(cacheKey, children);

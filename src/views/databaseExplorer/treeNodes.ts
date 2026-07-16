@@ -474,7 +474,10 @@ export class ColumnTreeNode extends BaseTreeNode {
         if (columnInfo.isUnique) tags.push(t('explorer.tagUK'));
         if (columnInfo.isAutoIncrement) tags.push(t('explorer.tagAI'));
         if (!columnInfo.nullable) tags.push(t('explorer.tagNotNull'));
-        const description = tags.length > 0 ? `${typeDisplay} ${tags.join(' ')}` : typeDisplay;
+        const parts: string[] = [typeDisplay];
+        if (columnInfo.comment) parts.push(columnInfo.comment);
+        if (tags.length > 0) parts.push(tags.join(' '));
+        const description = parts.join(' ');
         
         const tooltipParts: string[] = [
             t('explorer.column', columnInfo.name),

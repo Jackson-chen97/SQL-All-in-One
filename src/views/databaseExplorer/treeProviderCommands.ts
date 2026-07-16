@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DatabaseTreeProvider } from './DatabaseTreeProvider';
-import { ConnectionTreeNode, ObjectGroupTreeNode } from './treeNodes';
+import { ConnectionTreeNode, ObjectGroupTreeNode, TableTreeNode } from './treeNodes';
 import { getContainer, Tokens } from '../../core/diContainer';
 import type { IConnectionService, ISchemaService } from '../../application/ports';
 
@@ -131,6 +131,17 @@ export function registerTreeProviderCommands(context: vscode.ExtensionContext): 
             async (node: ObjectGroupTreeNode) => {
                 if (!treeProvider) return;
                 await treeProvider.filterObjectGroup(node);
+            },
+        ),
+    );
+
+    // Command: filter table columns by keyword
+    disposables.push(
+        vscode.commands.registerCommand(
+            'hive-formatter.filterTableColumns',
+            async (node: TableTreeNode) => {
+                if (!treeProvider) return;
+                await treeProvider.filterTableColumns(node);
             },
         ),
     );
