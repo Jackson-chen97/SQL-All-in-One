@@ -218,6 +218,7 @@ export interface ColumnMeta {
     enumValues?: string[];
     referencedTable?: string;
     comment?: string;
+    size?: string;
 }
 
 export interface DatabaseInfo {

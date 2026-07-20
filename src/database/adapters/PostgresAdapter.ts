@@ -63,8 +63,12 @@ class PostgresConnectionAdapter extends BaseConnectionAdapter<PostgresSharedCont
         const poolConfig = this.createPoolConfig(config);
 
         try {
-            const { Pool } = await import('pg');
-            this.shared.pool = new Pool(poolConfig);
+            const pg = await import('pg');
+            // Return NUMERIC (OID 1700) and BIGINT (OID 20) as strings to
+            // preserve precision for values that exceed Number.MAX_SAFE_INTEGER.
+            pg.types.setTypeParser(1700, (val: string) => val);
+            pg.types.setTypeParser(20, (val: string) => val);
+            this.shared.pool = new pg.Pool(poolConfig);
 
             const client = await this.shared.pool.connect();
             try {

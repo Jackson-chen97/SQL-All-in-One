@@ -225,6 +225,7 @@
     "hive-formatter.command.importConnections.title": "Import Connections",
     "hive-formatter.command.selectDatabases.title": "Select Databases",
     "hive-formatter.command.filterObjectGroup.title": "Filter...",
+    "hive-formatter.command.filterTableColumns.title": "Filter Columns...",
     "hive-formatter.viewsContainers.activitybar.title": "SQL All in One",
     "hive-formatter.configuration.title": "SQL All in One",
     "hive-formatter.command.formatSelection.title": "Format Selection (SQL All in One)",

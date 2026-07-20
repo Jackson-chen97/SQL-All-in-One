@@ -409,6 +409,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                 enumValues: c.enumValues,
                 referencedTable: c.referencedTable,
                 comment: c.comment,
+                size: c.size,
             })),
             rowCount: result.rowCount,
             affectedRows: result.affectedRows,
@@ -443,7 +444,11 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                 const row = rows[i];
                 const values = new Array(colCount);
                 for (let j = 0; j < colCount; j++) {
-                    values[j] = row[colNames[j]];
+                    const v = row[colNames[j]];
+                    // Convert BigInt to string – structured clone cannot
+                    // serialize BigInt and some drivers (mssql, oracledb)
+                    // return them for BIGINT columns.
+                    values[j] = typeof v === 'bigint' ? v.toString() : v;
                 }
                 batchRows[i - start] = values;
                 // Once a row has been serialized into a postMessage batch we
@@ -528,6 +533,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                     enumValues: c.enumValues,
                     referencedTable: c.referencedTable,
                     comment: c.comment,
+                    size: c.size,
                 })),
                 rowCount: result.rowCount,
                 affectedRows: result.affectedRows,
@@ -557,7 +563,8 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                     const row = rows[i];
                     const values = new Array(colCount);
                     for (let j = 0; j < colCount; j++) {
-                        values[j] = row[colNames[j]];
+                        const v = row[colNames[j]];
+                        values[j] = typeof v === 'bigint' ? v.toString() : v;
                     }
                     batchRows[i - start] = values;
                     if (isLargeResultSet && i >= 1000) {

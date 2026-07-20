@@ -248,7 +248,7 @@ function mapQueryResult(result: QueryResult): QueryExecutionResult {
     return {
         status: 'success',
         rows: result.rows,
-        columns: result.columns.map((c) => ({ name: c.name, type: c.type })),
+        columns: result.columns.map((c) => ({ name: c.name, type: c.type, comment: c.comment, size: c.size })),
         executionTime: result.executionTime,
         rowCount: result.rowCount,
         affectedRows: result.affectedRows,

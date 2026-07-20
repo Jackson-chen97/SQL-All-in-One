@@ -269,6 +269,11 @@ export class MysqlConnectionAdapter<TShared extends IMysqlProtocolSharedContext 
             connectTimeout: config.connectTimeout ?? 10000,
             enableKeepAlive: config.poolConfig?.enableKeepAlive ?? true,
             keepAliveInitialDelay: config.poolConfig?.keepAliveInterval ?? 30000,
+            // Return BIGINT and DECIMAL as strings to preserve precision for
+            // values that exceed Number.MAX_SAFE_INTEGER (2^53 − 1).
+            supportBigNumbers: true,
+            bigNumberStrings: true,
+            decimalNumbers: false,
         };
 
         if (config.options?.charset) {
@@ -298,6 +303,9 @@ export class MysqlConnectionAdapter<TShared extends IMysqlProtocolSharedContext 
             password: config.password,
             database: config.database,
             connectTimeout: config.connectTimeout ?? 10000,
+            supportBigNumbers: true,
+            bigNumberStrings: true,
+            decimalNumbers: false,
         };
 
         if (config.options?.charset) {
@@ -366,8 +374,87 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
         return await this.withAcquiredConnection(acquireTimeout, queryId, async (conn) => {
             const [result, fields] = await conn.query(sql, values);
             const executionTime = Date.now() - startTime;
-            return this.mapResultToQueryResult(result, fields, sql, queryId, executionTime);
+            const queryResult = this.mapResultToQueryResult(result, fields, sql, queryId, executionTime);
+
+            // Enrich columns with comments from INFORMATION_SCHEMA when
+            // the query returned a result set (SELECT).
+            if (queryResult.status === 'success' && queryResult.columns.length > 0) {
+                try {
+                    const database = this.shared.config?.database;
+                    if (database) {
+                        await this.enrichColumnsWithComments(conn, queryResult, database);
+                    }
+                } catch (e) { /* best-effort: ignore comment enrichment errors */ }
+            }
+
+            return queryResult;
         });
+    }
+
+    /**
+     * Best-effort enrichment: fetch column comments from
+     * INFORMATION_SCHEMA.COLUMNS for the current database and merge them
+     * into the query result's column metadata.
+     */
+    private async enrichColumnsWithComments(
+        conn: Pool | PoolConnection,
+        queryResult: QueryResult,
+        database: string,
+    ): Promise<void> {
+        const colNames = queryResult.columns.map(c => c.name);
+        if (colNames.length === 0) return;
+
+        // Build an IN clause with placeholders. Column names are safe to
+        // interpolate here because they come from the driver's field
+        // packets, not user input.
+        const placeholders = colNames.map(() => '?').join(',');
+        const commentSql =
+            `SELECT COLUMN_NAME, COLUMN_COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE ` +
+            `FROM INFORMATION_SCHEMA.COLUMNS ` +
+            `WHERE TABLE_SCHEMA = ? AND COLUMN_NAME IN (${placeholders})`;
+
+        const [rows] = await conn.query(commentSql, [database, ...colNames]) as [Array<{
+            COLUMN_NAME: string;
+            COLUMN_COMMENT: string;
+            CHARACTER_MAXIMUM_LENGTH: number | null;
+            NUMERIC_PRECISION: number | null;
+            NUMERIC_SCALE: number | null;
+        }>, unknown];
+
+        if (!rows || rows.length === 0) return;
+
+        const commentMap = new Map<string, string>();
+        const sizeMap = new Map<string, string | undefined>();
+        for (const row of rows) {
+            if (row.COLUMN_COMMENT && !commentMap.has(row.COLUMN_NAME)) {
+                commentMap.set(row.COLUMN_NAME, row.COLUMN_COMMENT);
+            }
+            if (!sizeMap.has(row.COLUMN_NAME)) {
+                let size: string | undefined;
+                if (row.NUMERIC_PRECISION !== null && row.NUMERIC_SCALE !== null && row.NUMERIC_SCALE > 0) {
+                    // DECIMAL(precision,scale) format
+                    size = `${row.NUMERIC_PRECISION},${row.NUMERIC_SCALE}`;
+                } else if (row.CHARACTER_MAXIMUM_LENGTH !== null) {
+                    // VARCHAR(size) format
+                    size = String(row.CHARACTER_MAXIMUM_LENGTH);
+                } else if (row.NUMERIC_PRECISION !== null) {
+                    // INT(precision) format
+                    size = String(row.NUMERIC_PRECISION);
+                }
+                sizeMap.set(row.COLUMN_NAME, size);
+            }
+        }
+
+        for (const col of queryResult.columns) {
+            const comment = commentMap.get(col.name);
+            if (comment) {
+                col.comment = comment;
+            }
+            const size = sizeMap.get(col.name);
+            if (size !== undefined) {
+                col.size = size;
+            }
+        }
     }
 
     /**
@@ -442,6 +529,7 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
                     isPrimaryKey: (flags & 0x0002) !== 0,
                     isAutoIncrement: (flags & 0x0200) !== 0,
                     isEnum: field.columnType === 247,
+                    size: field.columnLength,
                 };
             });
 
@@ -567,6 +655,21 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
         try {
             await fieldsPromise;
 
+            // Enrich columns with comments from INFORMATION_SCHEMA.
+            try {
+                const database = this.shared.config?.database;
+                if (database && getColumns().length > 0) {
+                    await this.enrichColumnsWithComments(queryConn, {
+                        columns: getColumns(),
+                        status: 'success',
+                        rows: [],
+                        rowCount: 0,
+                        queryId: '',
+                        executionTime: 0,
+                    }, database);
+                }
+            } catch (e) { /* best-effort: ignore comment enrichment errors */ }
+
             // If aborted before we started iterating, emit nothing and stop.
             if (abortedError) {
                 return;
@@ -640,6 +743,7 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
                         isPrimaryKey: (flags & 0x0002) !== 0,
                         isAutoIncrement: (flags & 0x0200) !== 0,
                         isEnum: field.columnType === 247,
+                        size: field.columnLength,
                     };
                 });
                 resolve();

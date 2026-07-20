@@ -161,6 +161,9 @@ const i18n = {
 
 let lang = 'zh';
 
+// Store original row order for restoring when sort is cleared
+var _originalRows = null;
+
 function t(key) {
     return i18n[lang][key] || i18n.en[key] || key;
 }
@@ -261,6 +264,34 @@ function getTypeColorInfoCached(type) {
     return result;
 }
 
+// MySQL numeric type code → human-readable name (matches table designer types)
+var MYSQL_TYPE_MAP = {
+    '0': 'decimal', '1': 'tinyint', '2': 'smallint', '3': 'int',
+    '4': 'float', '5': 'double', '6': 'null', '7': 'timestamp',
+    '8': 'bigint', '9': 'mediumint', '10': 'date', '11': 'time',
+    '12': 'datetime', '13': 'year', '14': 'date', '15': 'varchar',
+    '16': 'bit', '245': 'json', '246': 'decimal', '247': 'enum',
+    '248': 'set', '249': 'tinyblob', '250': 'mediumblob',
+    '251': 'longblob', '252': 'blob', '253': 'varchar',
+    '254': 'char', '255': 'geometry'
+};
+
+// Types that accept a size/length parameter
+var TYPES_WITH_SIZE = ['varchar', 'char', 'varbinary', 'binary', 'decimal', 'numeric'];
+
+function resolveTypeName(type, size) {
+    if (!type) return '';
+    // Already a name like "INT", "VARCHAR" — lowercase and return
+    if (/[a-zA-Z]/.test(type)) return type.toLowerCase();
+    // Numeric code — map to name
+    var name = MYSQL_TYPE_MAP[type] || type;
+    // For types that accept size, append (size)
+    if (size && TYPES_WITH_SIZE.indexOf(name) !== -1) {
+        return name + '(' + size + ')';
+    }
+    return name;
+}
+
 function rebuildPendingChangeMap() {
     _pendingChangeMap = {};
     for (var i = 0; i < state.pendingChanges.length; i++) {
@@ -299,12 +330,16 @@ function calcColumnWidths() {
         var col = state.columns[ci];
         var maxW = 0;
         var headerNameW = measureTextWidth(col.name || '', 11, '600');
-        var typeText = col.type || '';
+        var typeText = resolveTypeName(col.type, col.size) || '';
         var typeW = 0;
         if (typeText) {
             typeW = measureTextWidth(typeText, 9, '500') + 14;
         }
-        maxW = Math.max(maxW, headerNameW + typeW + COL_PADDING);
+        var commentW = 0;
+        if (col.comment) {
+            commentW = measureTextWidth(col.comment, 9, '400');
+        }
+        maxW = Math.max(maxW, headerNameW, commentW, headerNameW + typeW + COL_PADDING);
         for (var ri = 0; ri < sampleEnd; ri++) {
             var val = state.rows[ri] ? state.rows[ri][ci] : null;
             if (val === null || val === undefined) continue;
@@ -372,6 +407,52 @@ function applyColumnWidths() {
     bodyTable.style.width = tableWidth + 'px';
     headerTable.style.minWidth = '';
     bodyTable.style.minWidth = '';
+}
+
+// ─── Column Resize ───────────────────────────────────────────────────────────
+var _resizeState = null;
+
+function startColumnResize(colIdx, startEvent) {
+    var headerTable = document.getElementById('gridHeaderTable');
+    var headerCols = headerTable.querySelectorAll('colgroup col');
+    var colEl = headerCols[colIdx + 1]; // +1 because rowNum(0) is the first col
+    if (!colEl) return;
+
+    var startX = startEvent.clientX;
+    var startWidth = colEl ? parseInt(colEl.style.width, 10) || 100 : 100;
+    var handle = startEvent.target;
+    handle.classList.add('active');
+
+    _resizeState = { colIdx: colIdx, startX: startX, startWidth: startWidth, handle: handle };
+
+    var onMouseMove = function(e) {
+        if (!_resizeState) return;
+        var delta = e.clientX - _resizeState.startX;
+        var newWidth = Math.max(50, _resizeState.startWidth + delta);
+        _resizeState.currentWidth = newWidth;
+        // Live-preview: update the col element width directly
+        var hCols = headerTable.querySelectorAll('colgroup col');
+        if (hCols[colIdx + 1]) hCols[colIdx + 1].style.width = newWidth + 'px';
+        var bodyTable = document.getElementById('gridBodyTable');
+        var bCols = bodyTable.querySelectorAll('colgroup col');
+        if (bCols[colIdx + 1]) bCols[colIdx + 1].style.width = newWidth + 'px';
+    };
+
+    var onMouseUp = function() {
+        if (_resizeState && _resizeState.currentWidth) {
+            // Commit the resize into _colWidths so future re-renders keep it
+            _colWidths[colIdx] = _resizeState.currentWidth;
+        }
+        if (_resizeState && _resizeState.handle) {
+            _resizeState.handle.classList.remove('active');
+        }
+        _resizeState = null;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
 }
 
 function init() {
@@ -848,6 +929,7 @@ function handleMessage(event) {
 function handleQueryResult(data) {
     state.columns = data.columns || [];
     state.rows = data.rows || [];
+    _originalRows = state.rows.slice(); // Store original order for sort reset
     state.rowCount = data.rowCount || 0;
     state.affectedRows = data.affectedRows || 0;
     state.executionTime = data.executionTime || 0;
@@ -1052,29 +1134,60 @@ function renderHeader() {
         const th = document.createElement('th');
         th.onclick = () => handleSortClick(idx);
 
+        // Column name
         const nameSpan = document.createElement('span');
         nameSpan.className = 'col-name';
         nameSpan.textContent = col.name || '';
+        if (col.comment) {
+            nameSpan.title = col.comment;
+        }
+        th.appendChild(nameSpan);
 
+        // Column type line: type badge + size
         const typeSpan = document.createElement('span');
         typeSpan.className = 'col-type';
-        typeSpan.textContent = col.type || '';
-        var typeColorInfo = getTypeColorInfoCached(col.type);
+        typeSpan.textContent = resolveTypeName(col.type) || '';
+        var typeColorInfo = getTypeColorInfoCached(resolveTypeName(col.type));
         if (typeColorInfo) {
             typeSpan.style.color = typeColorInfo.color;
             typeSpan.style.background = typeColorInfo.bg;
             typeSpan.style.border = '1px solid ' + typeColorInfo.border;
         }
-
-        th.appendChild(nameSpan);
         th.appendChild(typeSpan);
 
+        if (col.size !== undefined && col.size !== null) {
+            const sizeSpan = document.createElement('span');
+            sizeSpan.className = 'col-size';
+            sizeSpan.textContent = '(' + col.size + ')';
+            th.appendChild(sizeSpan);
+        }
+
+        // Column comment (separate line, no // prefix)
+        if (col.comment) {
+            const commentSpan = document.createElement('span');
+            commentSpan.className = 'col-comment';
+            commentSpan.textContent = col.comment;
+            commentSpan.title = col.comment;
+            th.appendChild(commentSpan);
+        }
+
+        // Sort indicator
         if (state.sortColumn === idx && state.sortDirection) {
             const sortSpan = document.createElement('span');
             sortSpan.className = 'sort-indicator';
             sortSpan.textContent = state.sortDirection === 'asc' ? '▲' : '▼';
             th.appendChild(sortSpan);
         }
+
+        // Column resize handle
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'col-resize-handle';
+        resizeHandle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            startColumnResize(idx, e);
+        });
+        th.appendChild(resizeHandle);
 
         headerRow.appendChild(th);
     });
@@ -1243,6 +1356,10 @@ function handleSortClick(colIdx) {
             direction: state.sortDirection
         });
     } else {
+        // Sort cleared — restore original row order
+        if (_originalRows) {
+            state.rows = _originalRows.slice();
+        }
         renderGrid();
     }
 
@@ -1261,10 +1378,19 @@ function sortClientSide() {
         if (va === null || va === undefined) return 1;
         if (vb === null || vb === undefined) return -1;
 
+        // Both are numbers — numeric sort
         if (typeof va === 'number' && typeof vb === 'number') {
             return dir === 'asc' ? va - vb : vb - va;
         }
 
+        // Try numeric comparison for string values that look like numbers
+        var na = Number(va);
+        var nb = Number(vb);
+        if (!isNaN(na) && !isNaN(nb)) {
+            return dir === 'asc' ? na - nb : nb - na;
+        }
+
+        // Fallback to locale string comparison
         va = String(va);
         vb = String(vb);
         const cmp = va.localeCompare(vb);
@@ -2195,8 +2321,8 @@ function renderFormView() {
         labelDiv.textContent = col.name;
         var typeSpan = document.createElement('span');
         typeSpan.className = 'field-type';
-        typeSpan.textContent = col.type || '';
-        var typeColorInfo = getTypeColorInfoCached(col.type);
+        typeSpan.textContent = resolveTypeName(col.type) || '';
+        var typeColorInfo = getTypeColorInfoCached(resolveTypeName(col.type));
         if (typeColorInfo) {
             typeSpan.style.color = typeColorInfo.color;
             typeSpan.style.background = typeColorInfo.bg;
@@ -2204,11 +2330,20 @@ function renderFormView() {
         }
         labelDiv.appendChild(typeSpan);
 
+        if (col.size !== undefined && col.size !== null) {
+            var sizeSpan = document.createElement('span');
+            sizeSpan.className = 'field-type';
+            sizeSpan.textContent = '(' + col.size + ')';
+            sizeSpan.style.opacity = '0.5';
+            sizeSpan.style.marginLeft = '2px';
+            labelDiv.appendChild(sizeSpan);
+        }
+
         var valueDiv = document.createElement('div');
         valueDiv.className = 'form-field-value';
 
         var val = row[colIdx];
-        var colType = (col.type || '').toUpperCase();
+        var colType = resolveTypeName(col.type || '').toUpperCase();
 
         if (col.isEnum && col.enumValues && col.enumValues.length > 0) {
             var select = document.createElement('select');

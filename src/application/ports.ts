@@ -107,7 +107,7 @@ export interface IDialectMetadataProvider {
 export type QueryResultRow = Record<string, unknown>;
 
 export interface QueryResultMeta {
-    columns: { name: string; type: string }[];
+    columns: { name: string; type: string; comment?: string; size?: string }[];
 }
 
 export interface QueryExecutionResult {
