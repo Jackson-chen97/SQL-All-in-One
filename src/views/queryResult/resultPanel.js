@@ -807,6 +807,11 @@ function renderHeader() {
         const th = document.createElement('th');
         th.onclick = () => handleSortClick(idx);
 
+        // Add tooltip with comment if available
+        if (col.comment) {
+            th.title = col.comment;
+        }
+
         const nameSpan = document.createElement('span');
         nameSpan.className = 'col-name';
         nameSpan.textContent = col.name || '';
@@ -823,6 +828,15 @@ function renderHeader() {
 
         th.appendChild(nameSpan);
         th.appendChild(typeSpan);
+
+        // Show comment below column name if available
+        if (col.comment) {
+            const commentSpan = document.createElement('span');
+            commentSpan.className = 'col-comment';
+            commentSpan.textContent = col.comment;
+            commentSpan.style.cssText = 'display:block;font-size:10px;color:var(--text-secondary);opacity:0.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;margin-top:2px;';
+            th.appendChild(commentSpan);
+        }
 
         if (state.sortColumn === idx && state.sortDirection) {
             const sortSpan = document.createElement('span');

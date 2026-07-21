@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { QueryResultPanel } from './QueryResultPanel';
+import { BaseWebviewPanel } from '../BaseWebviewPanel';
 import { QueryResultController } from '../../application/QueryResultController';
 import { getContainer, Tokens } from '../../core/diContainer';
 import type {
@@ -26,6 +27,11 @@ import { t } from '../../i18n';
 function ensurePanel(context: vscode.ExtensionContext): QueryResultPanel | undefined {
     const existing = QueryResultPanel.getCurrentInstance();
     if (existing) {
+        // Reveal the existing panel so it gets focus on subsequent table clicks
+        const column = vscode.window.activeTextEditor
+            ? vscode.window.activeTextEditor.viewColumn
+            : undefined;
+        BaseWebviewPanel.revealExisting(QueryResultPanel.viewType, column || vscode.ViewColumn.Two);
         return existing;
     }
     const container = getContainer();

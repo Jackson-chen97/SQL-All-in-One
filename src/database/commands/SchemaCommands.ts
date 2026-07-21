@@ -7,6 +7,8 @@ import { getSchemaCache } from '../schema/SchemaCache';
 import type { DatabaseAdapter } from '../adapters/AdapterFactory';
 import { t } from '../../i18n/index';
 import { getConfigManager } from '../../core/configManager';
+import { formatEditorText } from '../../utils/formatEditorText';
+import { createConfig } from '../../core/configManager';
 
 // NOTE: This module no longer imports anything from the views layer.
 // All panel operations (QueryResultPanel, TableDesignerPanel, ExplainPlanPanel,
@@ -37,333 +39,19 @@ function getNodeField(node: ITreeNode, field: string): string {
     return (node as unknown as Record<string, unknown>)[field] as string;
 }
 
-function formatColumnDefs(ddl: string): string {
-    const viewMatch = ddl.match(/^CREATE\s+(?:MATERIALIZED\s+)?VIEW\s+`[^`]+`\s*\(/i);
-    if (!viewMatch) return ddl;
-    const startIdx = viewMatch.index! + viewMatch[0].length - 1;
-    let depth = 1;
-    let i = startIdx + 1;
-    let inQuote = false;
-    let quoteChar = '';
-    while (i < ddl.length && depth > 0) {
-        const ch = ddl[i];
-        if (inQuote) {
-            if (ch === quoteChar && ddl[i - 1] !== '\\') { inQuote = false; }
-            i++;
-            continue;
-        }
-        if (ch === '"' || ch === "'") { inQuote = true; quoteChar = ch; i++; continue; }
-        if (ch === '(') { depth++; i++; continue; }
-        if (ch === ')') { depth--; if (depth === 0) break; i++; continue; }
-        i++;
-    }
-    if (depth !== 0) return ddl;
-    const endIdx = i;
-    const inner = ddl.substring(startIdx + 1, endIdx);
-    const cols = splitColumnDefs(inner);
-    if (cols.length <= 1) return ddl;
-    return ddl.substring(0, startIdx + 1) + '\n  ' + cols.join(',\n  ') + '\n' + ddl.substring(endIdx);
-}
-
-function splitColumnDefs(content: string): string[] {
-    const items: string[] = [];
-    let current = '';
-    let depth = 0;
-    let inQuote = false;
-    let quoteChar = '';
-    for (let i = 0; i < content.length; i++) {
-        const ch = content[i];
-        if (inQuote) {
-            current += ch;
-            if (ch === quoteChar && content[i - 1] !== '\\') { inQuote = false; }
-            continue;
-        }
-        if (ch === '"' || ch === "'") { inQuote = true; quoteChar = ch; current += ch; continue; }
-        if (ch === '(') { depth++; current += ch; continue; }
-        if (ch === ')') { depth--; current += ch; continue; }
-        if (ch === ',' && depth === 0) {
-            const trimmed = current.trim();
-            if (trimmed) items.push(trimmed);
-            current = '';
-            continue;
-        }
-        current += ch;
-    }
-    const trimmed = current.trim();
-    if (trimmed) items.push(trimmed);
-    return items;
-}
-
 function formatDdlOutput(ddl: string): string {
-    let s = ddl.replace(/\s+/g, ' ').trim();
-
-    s = formatColumnDefs(s);
-
-    s = s.replace(/\)\s+(COMMENT\s)/i, ')\n$1');
-    s = s.replace(/\)\s+(DISTRIBUTED\b)/i, ')\n$1');
-    s = s.replace(/\)\s+(REFRESH\b)/i, ')\n$1');
-    s = s.replace(/\)\s+(PROPERTIES\s*\()/i, ')\n$1');
-    s = s.replace(/\)\s+(AS\s+SELECT\b)/i, ')\n$1');
-
-    s = s.replace(/"\s+(DISTRIBUTED\b)/g, '"\n$1');
-    s = s.replace(/"\s+(REFRESH\b)/g, '"\n$1');
-    s = s.replace(/"\s+(PROPERTIES\s*\()/g, '"\n$1');
-    s = s.replace(/"\s+(AS\s+SELECT\b)/g, '"\n$1');
-
-    s = s.replace(
-        /PROPERTIES\s*\(([^)]+)\)/i,
-        (_m, inner: string) => {
-            const items = splitProperties(inner);
-            return 'PROPERTIES (\n  ' + items.join(',\n  ') + '\n)';
-        }
-    );
-
-    s = s.replace(
-        /\bAS\s+SELECT\b(.+)/is,
-        (_m, rest: string) => {
-            if (hasTopLevelUnionAll(rest)) {
-                return 'AS\n' + formatUnionSelect(rest);
-            }
-            let formatted = rest
-                .replace(/\s+FROM\b/gi, '\nFROM')
-                .replace(/\s+WHERE\b/gi, '\nWHERE')
-                .replace(/\s+GROUP\s+BY\b/gi, '\nGROUP BY')
-                .replace(/\s+HAVING\b/gi, '\nHAVING')
-                .replace(/\s+ORDER\s+BY\b/gi, '\nORDER BY')
-                .replace(/\s+LIMIT\b/gi, '\nLIMIT');
-            formatted = 'AS\nSELECT' + splitSelectColumns(formatted);
-            return formatSubquery(formatted);
-        }
-    );
-
-    return s;
-}
-
-function hasTopLevelUnionAll(sql: string): boolean {
-    let depth = 0;
-    let inQuote = false;
-    let quoteChar = '';
-    const upper = sql.toUpperCase();
-    for (let i = 0; i < sql.length; i++) {
-        const ch = sql[i];
-        if (inQuote) {
-            if (ch === quoteChar && sql[i - 1] !== '\\') {
-                inQuote = false;
-            }
-            continue;
-        }
-        if (ch === '"' || ch === "'") {
-            inQuote = true;
-            quoteChar = ch;
-            continue;
-        }
-        if (ch === '(') { depth++; continue; }
-        if (ch === ')') { depth--; continue; }
-        if (depth === 0 && upper.substring(i).startsWith('UNION ALL')) {
-            return true;
-        }
+    try {
+        const extensionSettings = vscode.workspace.getConfiguration('SQL-All-in-One');
+        const formattingOptions: vscode.FormattingOptions = {
+            tabSize: extensionSettings.get<number>('format.tabSize', 2),
+            insertSpaces: extensionSettings.get<boolean>('format.useTabs', false) === false,
+        };
+        const config = createConfig(extensionSettings, formattingOptions, 'starrocks');
+        return formatEditorText(ddl, config);
+    } catch {
+        // Fallback to basic formatting if shared formatter fails
+        return ddl.replace(/\s+/g, ' ').trim();
     }
-    return false;
-}
-
-function splitProperties(content: string): string[] {
-    const items: string[] = [];
-    let current = '';
-    let inQuote = false;
-    let quoteChar = '';
-
-    for (let i = 0; i < content.length; i++) {
-        const ch = content[i];
-
-        if (inQuote) {
-            current += ch;
-            if (ch === quoteChar && content[i - 1] !== '\\') {
-                inQuote = false;
-            }
-            continue;
-        }
-
-        if (ch === '"' || ch === "'") {
-            inQuote = true;
-            quoteChar = ch;
-            current += ch;
-            continue;
-        }
-
-        if (ch === ',') {
-            const trimmed = current.trim();
-            if (trimmed) items.push(trimmed);
-            current = '';
-            continue;
-        }
-
-        current += ch;
-    }
-
-    const trimmed = current.trim();
-    if (trimmed) items.push(trimmed);
-
-    return items;
-}
-
-function splitSelectColumns(selectPart: string): string {
-    const fromIdx = selectPart.search(/\nFROM\b/i);
-    const selectBody = fromIdx >= 0 ? selectPart.substring(0, fromIdx) : selectPart;
-    const afterFrom = fromIdx >= 0 ? selectPart.substring(fromIdx) : '';
-
-    const trimmed = selectBody.trim();
-    if (!trimmed) return selectPart;
-
-    const cols: string[] = [];
-    let current = '';
-    let depth = 0;
-    let inQuote = false;
-    let quoteChar = '';
-
-    for (let i = 0; i < trimmed.length; i++) {
-        const ch = trimmed[i];
-
-        if (inQuote) {
-            current += ch;
-            if (ch === quoteChar && trimmed[i - 1] !== '\\') {
-                inQuote = false;
-            }
-            continue;
-        }
-
-        if (ch === '"' || ch === "'") {
-            inQuote = true;
-            quoteChar = ch;
-            current += ch;
-            continue;
-        }
-
-        if (ch === '(') { depth++; current += ch; continue; }
-        if (ch === ')') { depth--; current += ch; continue; }
-
-        if (ch === ',' && depth === 0) {
-            const c = current.trim();
-            if (c) cols.push(c);
-            current = '';
-            continue;
-        }
-
-        current += ch;
-    }
-
-    const c = current.trim();
-    if (c) cols.push(c);
-
-    if (cols.length <= 1) return selectPart;
-
-    return '\n  ' + cols.join(',\n  ') + afterFrom;
-}
-
-function formatUnionSelect(sql: string): string {
-    const parts = sql.split(/\bUNION\s+ALL\b/i).map(p => p.trim());
-    const formattedParts = parts.map((part, idx) => {
-        let p = part;
-        if (!/^\s*SELECT\b/i.test(p)) {
-            p = 'SELECT ' + p;
-        }
-        p = p
-            .replace(/\bSELECT\b\s*/i, 'SELECT\n  ')
-            .replace(/\s+FROM\b/gi, '\nFROM')
-            .replace(/\s+WHERE\b/gi, '\nWHERE')
-            .replace(/\s+GROUP\s+BY\b/gi, '\nGROUP BY')
-            .replace(/\s+HAVING\b/gi, '\nHAVING')
-            .replace(/\s+ORDER\s+BY\b/gi, '\nORDER BY')
-            .replace(/\s+LIMIT\b/gi, '\nLIMIT');
-        p = formatSelectColsInLine(p);
-        if (idx < parts.length - 1) {
-            return p + '\nUNION ALL';
-        }
-        return p;
-    });
-    const lastPart = formattedParts[formattedParts.length - 1];
-    const unionParts = formattedParts.slice(0, -1);
-    const match = lastPart.match(/^([\s\S]*?)(FROM\b[\s\S]*)$/i);
-    if (match) {
-        const selectBlock = match[1].trimEnd();
-        const restBlock = match[2];
-        const formatted = restBlock
-            .replace(/FROM\b\s*/i, 'FROM\n  ')
-            .replace(/\s+WHERE\b/gi, '\nWHERE')
-            .replace(/\s+GROUP\s+BY\b/gi, '\nGROUP BY')
-            .replace(/\s+ORDER\s+BY\b/gi, '\nORDER BY')
-            .replace(/\s+LIMIT\b/gi, '\nLIMIT');
-        return [...unionParts, selectBlock, formatted].join('\n');
-    }
-    return formattedParts.join('\n');
-}
-
-function formatSelectColsInLine(selectBlock: string): string {
-    const lines = selectBlock.split('\n');
-    if (lines.length < 2) return selectBlock;
-    const keyword = lines[0];
-    const rest = lines.slice(1).join('\n');
-    const fromIdx = rest.search(/\n\s*FROM\b/i);
-    const colsPart = fromIdx >= 0 ? rest.substring(0, fromIdx) : rest;
-    const afterPart = fromIdx >= 0 ? rest.substring(fromIdx) : '';
-    const cols = colsPart.split(/\s*,\s*/).filter(c => c.trim());
-    if (cols.length <= 1) return selectBlock;
-    return keyword + '\n  ' + cols.join(',\n  ') + afterPart;
-}
-
-function formatSubquery(sql: string): string {
-    let result = '';
-    let i = 0;
-    while (i < sql.length) {
-        if (sql[i] === '(') {
-            let depth = 1;
-            let j = i + 1;
-            while (j < sql.length && depth > 0) {
-                if (sql[j] === '(') depth++;
-                if (sql[j] === ')') depth--;
-                j++;
-            }
-            const inner = sql.substring(i + 1, j - 1).trim();
-            if (/^\s*SELECT\b/i.test(inner)) {
-                if (/\bUNION\s+ALL\b/i.test(inner)) {
-                    const parts = inner.split(/\bUNION\s+ALL\b/i).map(p => p.trim());
-                    const formatted = parts.map((p, idx) => {
-                        let fp = p
-                            .replace(/\bSELECT\b\s*/i, 'SELECT\n      ')
-                            .replace(/\s+FROM\b/gi, '\n    FROM')
-                            .replace(/\s+WHERE\b/gi, '\n    WHERE');
-                        fp = formatSubqueryCols(fp);
-                        if (idx < parts.length - 1) {
-                            return fp + '\n  UNION ALL';
-                        }
-                        return fp;
-                    });
-                    result += '(\n  ' + formatted.join('\n') + '\n)';
-                } else {
-                    result += '(' + inner + ')';
-                }
-            } else {
-                result += sql.substring(i, j);
-            }
-            i = j;
-        } else {
-            result += sql[i];
-            i++;
-        }
-    }
-    return result;
-}
-
-function formatSubqueryCols(block: string): string {
-    const lines = block.split('\n');
-    if (lines.length < 2) return block;
-    const keyword = lines[0].trim();
-    const rest = lines.slice(1).join('\n');
-    const fromIdx = rest.search(/\n\s*FROM\b/i);
-    const colsPart = fromIdx >= 0 ? rest.substring(0, fromIdx) : rest;
-    const afterPart = fromIdx >= 0 ? rest.substring(fromIdx) : '';
-    const cols = colsPart.split(/\s*,\s*/).map(c => c.trim()).filter(c => c);
-    if (cols.length <= 1) return block;
-    return keyword + '\n      ' + cols.join(',\n      ') + afterPart;
 }
 
 export function registerSchemaCommands(
@@ -374,9 +62,10 @@ export function registerSchemaCommands(
 
     disposables.push(
         vscode.commands.registerCommand('hive-formatter.refreshSchema', async () => {
-            const activeConn = getConnectionManager().getActiveConnection();
-            if (activeConn) {
-                getSchemaCache().invalidate(activeConn.id);
+            // Invalidate schema cache for all connections, not just the active one
+            const connections = getConnectionManager().getAllConnections();
+            for (const conn of connections) {
+                getSchemaCache().invalidate(conn.id);
             }
             vscode.commands.executeCommand('hive-formatter.refreshTreeProvider');
         })

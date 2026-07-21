@@ -248,6 +248,7 @@ class StarrocksMetadataAdapter extends MysqlMetadataAdapter<StarrocksSharedConte
             }
             return {
                 name: (row.name ?? row.Name ?? row.NAME) as string,
+                comment: (row.comment ?? row.Comment ?? row.COMMENT ?? row.table_comment ?? row.TableComment) as string | undefined,
                 status,
             };
         });

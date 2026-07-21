@@ -5,11 +5,96 @@ import { preprocessFlinkSql, postprocessFlinkSql } from "../formatter/FlinkSqlAd
 import { extract as extractComments, restore as restoreComments } from "../formatter/CommentPreserver"
 import { handleError, ErrorCategory } from "../core/errorHandler"
 
+/**
+ * Format column definitions in materialized view DDL.
+ * Ensures each column with its COMMENT is on a separate line.
+ * Example: `col` COMMENT "desc",
+ */
+function formatMvColumnDefs(sql: string): string {
+    // Match CREATE MATERIALIZED VIEW ... ( columns ) pattern
+    const mvPattern = /^((?:CREATE\s+MATERIALIZED\s+VIEW\s+[`"']?\w+[`"']?\s*))\(/i
+    const match = sql.match(mvPattern)
+    if (!match) return sql
+
+    const prefix = match[0]
+    const startIdx = prefix.length
+
+    // Find the matching closing paren
+    let depth = 1
+    let i = startIdx
+    let inQuote = false
+    let quoteChar = ''
+    while (i < sql.length && depth > 0) {
+        const ch = sql[i]
+        if (inQuote) {
+            if (ch === quoteChar && sql[i - 1] !== '\\') { inQuote = false }
+            i++
+            continue
+        }
+        if (ch === '"' || ch === "'") { inQuote = true; quoteChar = ch; i++; continue }
+        if (ch === '(') { depth++; i++; continue }
+        if (ch === ')') { depth--; if (depth === 0) break; i++; continue }
+        i++
+    }
+    if (depth !== 0) return sql
+
+    const endIdx = i
+    const inner = sql.substring(startIdx, endIdx)
+
+    // Parse individual column definitions
+    // Each column: `col_name` COMMENT "comment_text"
+    const columns: string[] = []
+    let current = ''
+    let colDepth = 0
+    let colInQuote = false
+    let colQuoteChar = ''
+
+    for (let j = 0; j < inner.length; j++) {
+        const ch = inner[j]
+        if (colInQuote) {
+            current += ch
+            if (ch === colQuoteChar && inner[j - 1] !== '\\') { colInQuote = false }
+            continue
+        }
+        if (ch === '"' || ch === "'") {
+            colInQuote = true
+            colQuoteChar = ch
+            current += ch
+            continue
+        }
+        if (ch === '(') { colDepth++; current += ch; continue }
+        if (ch === ')') { colDepth--; current += ch; continue }
+
+        if (ch === ',' && colDepth === 0) {
+            const trimmed = current.trim()
+            if (trimmed) columns.push(trimmed)
+            current = ''
+            continue
+        }
+        current += ch
+    }
+    const lastTrimmed = current.trim()
+    if (lastTrimmed) columns.push(lastTrimmed)
+
+    if (columns.length === 0) return sql
+
+    // Format each column on its own line with 4-space indent
+    const formattedCols = columns.map(col => '    ' + col)
+
+    // Reconstruct the SQL
+    return sql.substring(0, startIdx) +
+        '\n' + formattedCols.join(',\n') + '\n' +
+        sql.substring(endIdx)
+}
+
 export function formatEditorText(
     text: string,
     config: FormatOptionsWithLanguage,
 ): string {
-    const { processedSql, slots } = extractComments(text)
+    // Pre-process: format materialized view column definitions
+    const preprocessed = formatMvColumnDefs(text)
+
+    const { processedSql, slots } = extractComments(preprocessed)
 
     let formatted: string
     if (config.language === 'spark') {

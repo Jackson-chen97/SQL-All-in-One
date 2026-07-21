@@ -613,6 +613,12 @@
                 "key": "ctrl+shift+r",
                 "mac": "cmd+shift+r",
                 "when": "editorTextFocus && editorLangId =~ /sql|hive|hive-sql|mysql|spark|flinksql|flink-sql|postgresql|postgres|bigquery|sqlite|starrocks|sqlserver|plsql|oracle|dameng/"
+            },
+            {
+                "command": "hive-formatter.format-selection",
+                "key": "ctrl+alt+l",
+                "mac": "cmd+alt+l",
+                "when": "editorTextFocus && editorLangId =~ /sql|hive|hive-sql|mysql|spark|flinksql|flink-sql|postgresql|postgres|bigquery|sqlite|starrocks|sqlserver|plsql|oracle|dameng/"
             }
         ],
         "configuration": {

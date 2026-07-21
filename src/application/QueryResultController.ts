@@ -63,8 +63,12 @@ export class QueryResultController {
         private readonly queryService: IQueryService,
         private readonly dataEditService: IDataEditService,
         private readonly connectionId?: string,
-        private readonly database?: string,
+        private _database?: string,
     ) {}
+
+    get database(): string | undefined {
+        return this._database;
+    }
 
     /**
      * Wires all panel callbacks. Mirrors the behavior of the former
@@ -232,22 +236,25 @@ export class QueryResultController {
                 const connId = this.connectionId ?? this.connectionService.getActiveConnection()?.id;
                 if (!connId) return;
 
-                const cfg = this.connectionService.getConnection(connId);
-                if (cfg) {
-                    await this.connectionService.updateConnection(connId, {
-                        ...cfg,
-                        database: changedDb || cfg.database || '',
-                    });
-                }
+                // Execute USE <database> directly on the adapter instead of
+                // calling updateConnection() which disconnects the connection.
                 if (changedDb) {
                     const adapter = this.connectionService.getAdapter(connId);
+                    const cfg = this.connectionService.getConnection(connId);
                     if (adapter) {
-                        const dbs = await this.queryService.listDatabases();
-                        panel.sendDatabaseList(
-                            dbs.map((d) => d.name),
-                            changedDb,
-                        );
+                        const quote = this.getIdentifierQuote(cfg?.dialect);
+                        await adapter.queryAdapter.execute(`USE ${quote}${changedDb}${quote}`);
                     }
+                    // Update the controller's database context for subsequent queries
+                    this._database = changedDb;
+                }
+
+                if (changedDb) {
+                    const dbs = await this.queryService.listDatabases();
+                    panel.sendDatabaseList(
+                        dbs.map((d) => d.name),
+                        changedDb,
+                    );
                 }
             } catch (e) {
                 // Database change is best-effort, but still surface the error
@@ -274,5 +281,16 @@ export class QueryResultController {
             }
         }
         return '';
+    }
+
+    private getIdentifierQuote(dialect?: string): string {
+        switch (dialect) {
+            case 'mysql':
+                return '`';
+            case 'sqlserver':
+                return '[';
+            default:
+                return '"';
+        }
     }
 }

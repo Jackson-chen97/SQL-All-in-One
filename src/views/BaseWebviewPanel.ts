@@ -51,7 +51,7 @@ export abstract class BaseWebviewPanel implements vscode.Disposable {
         return BaseWebviewPanel.getExistingInstance(viewType) !== undefined;
     }
 
-    protected static revealExisting(viewType: string, viewColumn?: vscode.ViewColumn): boolean {
+    public static revealExisting(viewType: string, viewColumn?: vscode.ViewColumn): boolean {
         const instance = BaseWebviewPanel.getExistingInstance<BaseWebviewPanel>(viewType);
         if (instance) {
             instance._panel.reveal(viewColumn);

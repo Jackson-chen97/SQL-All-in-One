@@ -188,10 +188,43 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
             if (filter) {
                 this.nodeCache.delete(`${element.id}::filter=${filter}`);
             }
+            // Invalidate schema cache for the specific element's connection/database
+            this.invalidateSchemaCacheForElement(element);
         } else {
             this.nodeCache.clear();
+            // Invalidate all schema caches for all connections
+            this.invalidateAllSchemaCaches();
         }
         this._onDidChangeTreeData.fire(element);
+    }
+
+    /**
+     * Invalidate schema cache for a specific tree element's connection/database.
+     */
+    private invalidateSchemaCacheForElement(element: ITreeNode): void {
+        let connectionId: string | undefined;
+        let database: string | undefined;
+
+        if ('connectionId' in element) {
+            connectionId = (element as { connectionId: string }).connectionId;
+        }
+        if ('databaseName' in element) {
+            database = (element as { databaseName: string }).databaseName;
+        }
+
+        if (connectionId) {
+            this.schemaCache.invalidate(connectionId, undefined, database);
+        }
+    }
+
+    /**
+     * Invalidate all schema caches for all connections.
+     */
+    private invalidateAllSchemaCaches(): void {
+        const connections = this.connectionManager.getAllConnections();
+        for (const conn of connections) {
+            this.schemaCache.invalidate(conn.id);
+        }
     }
 
     /**
@@ -443,6 +476,10 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
 
         if (element instanceof TableTreeNode) {
             return this.getTableChildren(element);
+        }
+
+        if (element instanceof MaterializedViewTreeNode) {
+            return this.getMaterializedViewChildren(element);
         }
 
         if (element instanceof FunctionTreeNode) {
@@ -831,6 +868,46 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
             return children;
         } catch (error) {
             handleError(error, 'DatabaseTreeProvider.getTableChildren', ErrorCategory.FEATURE);
+            return [];
+        }
+    }
+
+    private async getMaterializedViewChildren(parent: MaterializedViewTreeNode): Promise<ITreeNode[]> {
+        const cacheKey = parent.id;
+        const cached = this.nodeCache.get(cacheKey);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        try {
+            const adapter: IDatabaseAdapter | undefined = this.connectionManager.getAdapter(parent.connectionId);
+            if (!adapter) {
+                return [];
+            }
+
+            const children: ITreeNode[] = [];
+
+            // Fetch columns using describeTable (works for materialized views in StarRocks)
+            try {
+                const structure = await adapter.schemaAdapter.describeTable(parent.databaseName, parent.mvName);
+                for (const column of structure.columns) {
+                    children.push(new ColumnTreeNode(
+                        column,
+                        parent.connectionId,
+                        parent.databaseName,
+                        parent.mvName,
+                        parent
+                    ));
+                }
+            } catch (e) {
+                // Column info may not be available for all materialized views
+                handleError(e, 'DatabaseTreeProvider.getMaterializedViewChildren.columns', ErrorCategory.SUB_ITEM);
+            }
+
+            this.nodeCache.set(cacheKey, children);
+            return children;
+        } catch (error) {
+            handleError(error, 'DatabaseTreeProvider.getMaterializedViewChildren', ErrorCategory.FEATURE);
             return [];
         }
     }

@@ -408,12 +408,31 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
         // interpolate here because they come from the driver's field
         // packets, not user input.
         const placeholders = colNames.map(() => '?').join(',');
-        const commentSql =
-            `SELECT COLUMN_NAME, COLUMN_COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, TABLE_NAME ` +
-            `FROM INFORMATION_SCHEMA.COLUMNS ` +
-            `WHERE TABLE_SCHEMA = ? AND COLUMN_NAME IN (${placeholders})`;
 
-        const [rows] = await conn.query(commentSql, [database, ...colNames]) as [Array<{
+        // First, try to find the table name from the result metadata
+        // This helps get the correct comments when multiple tables have same column names
+        const existingTableName = queryResult.tableName;
+
+        let commentSql: string;
+        let queryParams: (string | number)[];
+
+        if (existingTableName) {
+            // If we know the table name, filter by it (same as describeTableColumns)
+            commentSql =
+                `SELECT COLUMN_NAME, COLUMN_COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, TABLE_NAME ` +
+                `FROM INFORMATION_SCHEMA.COLUMNS ` +
+                `WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME IN (${placeholders})`;
+            queryParams = [database, existingTableName, ...colNames];
+        } else {
+            // Otherwise, query without table name filter
+            commentSql =
+                `SELECT COLUMN_NAME, COLUMN_COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, TABLE_NAME ` +
+                `FROM INFORMATION_SCHEMA.COLUMNS ` +
+                `WHERE TABLE_SCHEMA = ? AND COLUMN_NAME IN (${placeholders})`;
+            queryParams = [database, ...colNames];
+        }
+
+        const [rows] = await conn.query(commentSql, queryParams) as [Array<{
             COLUMN_NAME: string;
             COLUMN_COMMENT: string;
             CHARACTER_MAXIMUM_LENGTH: number | null;

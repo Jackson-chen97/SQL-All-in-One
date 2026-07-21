@@ -319,7 +319,7 @@ export class MaterializedViewTreeNode extends BaseTreeNode {
             iconPath: isInactive
                 ? new vscode.ThemeIcon('layers', new vscode.ThemeColor('disabledForeground'))
                 : new vscode.ThemeIcon('layers'),
-            collapsibleState: vscode.TreeItemCollapsibleState.None,
+            collapsibleState: vscode.TreeItemCollapsibleState.Collapsed,
             parent,
             tooltip: comment ? `${t('explorer.materializedView', mvName)}\n${comment}` : t('explorer.materializedView', mvName)
         });

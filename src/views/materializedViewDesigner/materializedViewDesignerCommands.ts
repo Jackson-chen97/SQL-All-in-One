@@ -3,6 +3,8 @@ import type { IConnectionService, ISchemaService } from '../../application/ports
 import { MaterializedViewDesignerPanel } from './MaterializedViewDesignerPanel';
 import { handleError, ErrorCategory } from '../../core/errorHandler';
 import type { MaterializedViewTreeNode } from '../databaseExplorer/treeNodes';
+import { formatEditorText } from '../../utils/formatEditorText';
+import { createConfig } from '../../core/configManager';
 
 export function registerMaterializedViewDesignerCommands(
     context: vscode.ExtensionContext,
@@ -157,10 +159,25 @@ export function registerMaterializedViewDesignerCommands(
                         return;
                     }
 
-                    const ddl = await adapter.schemaAdapter.getMaterializedViewDDL(
+                    const rawDdl = await adapter.schemaAdapter.getMaterializedViewDDL(
                         node.databaseName,
                         node.mvName,
                     );
+
+                    // Format the DDL using the shared formatter
+                    let ddl = rawDdl;
+                    try {
+                        const extensionSettings = vscode.workspace.getConfiguration('SQL-All-in-One');
+                        const formattingOptions: vscode.FormattingOptions = {
+                            tabSize: extensionSettings.get<number>('format.tabSize', 2),
+                            insertSpaces: extensionSettings.get<boolean>('format.useTabs', false) === false,
+                        };
+                        const config = createConfig(extensionSettings, formattingOptions, 'starrocks');
+                        ddl = formatEditorText(rawDdl, config);
+                    } catch {
+                        // Use raw DDL if formatting fails
+                        ddl = rawDdl;
+                    }
 
                     const document = await vscode.workspace.openTextDocument({
                         content: ddl,
