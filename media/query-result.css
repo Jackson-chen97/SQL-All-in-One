@@ -13,7 +13,7 @@
   --row-num-width: 44px;
   --header-height: 28px;
   --zebra-bg: rgba(255,255,255,0.015);
-  --row-selected-bg: rgba(74, 158, 255, 0.12);
+  --row-selected-bg: rgba(74, 158, 255, 0.25);
   --row-hover-bg: rgba(255,255,255,0.04);
 }
 
@@ -149,13 +149,15 @@ body {
   top: 100%;
   right: 0;
   margin-top: 2px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-  z-index: 100;
-  min-width: 140px;
+  background-color: #252526 !important;
+  background: #252526 !important;
+  border: 1px solid #444;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+  z-index: 1000;
+  min-width: 120px;
   overflow: hidden;
+  opacity: 1 !important;
 }
 
 .tb-dropdown-menu.open {
@@ -163,15 +165,44 @@ body {
 }
 
 .tb-dropdown-item {
-  padding: 5px 12px;
+  padding: 6px 14px;
   cursor: pointer;
   font-size: 12px;
   transition: none;
+  background-color: #252526 !important;
+  color: #ccc;
 }
 
 .tb-dropdown-item:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background-color: #094771 !important;
+  color: #fff;
+}
+
+.tb-dropdown-item.selected {
+  background: var(--accent);
+  color: var(--btn-fg, #fff);
+}
+
+/* Export format group */
+.export-format-group {
+  display: inline-flex;
+  align-items: center;
+}
+
+.export-format-group .tb-dropdown {
+  position: relative;
+}
+
+.export-format-btn {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  min-width: 90px;
+}
+
+.export-format-group > .tb-btn:last-child {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  border-left: none;
 }
 
 .filter-bar {
@@ -403,6 +434,30 @@ body {
   background: transparent;
 }
 
+/* Checkbox column */
+.cell-checkbox {
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  text-align: center;
+  cursor: default;
+}
+
+.cell-checkbox:hover {
+  background: transparent;
+}
+
+.cell-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+}
+
+td.cell-checkbox {
+  vertical-align: middle;
+}
+
 .col-name {
   display: block;
   overflow: hidden;
@@ -535,6 +590,18 @@ body {
 
 .grid-body-table tr.row-selected td {
   background: var(--row-selected-bg);
+}
+
+.grid-body-table tr.row-checked td {
+  background: rgba(0, 120, 212, 0.3) !important;
+}
+
+.grid-body-table tr.row-checked td.row-num {
+  background: rgba(0, 120, 212, 0.4) !important;
+}
+
+.grid-body-table tr.row-checked td.cell-checkbox {
+  background: rgba(0, 120, 212, 0.4) !important;
 }
 
 .grid-body-table td:not(.row-num) {

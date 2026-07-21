@@ -198,6 +198,8 @@ const state = {
     sortDirection: null,
     filterConditions: [{ column: '', operator: '=', value: '' }],
     selectedCell: null,
+    selectedRows: new Set(),
+    lastExportFormat: 'csv',
     messages: [],
     history: [],
     queryId: null,
@@ -308,6 +310,8 @@ const COL_PADDING = 24;
 const COL_SAMPLE_ROWS = 50;
 
 var _colWidths = [];
+var _userColWidths = {};
+var _widthsLocked = false;
 var _measureCanvas = null;
 
 function measureTextWidth(text, fontSize, fontWeight) {
@@ -322,6 +326,10 @@ function measureTextWidth(text, fontSize, fontWeight) {
 function calcColumnWidths() {
     if (!state.columns.length) {
         _colWidths = [];
+        return;
+    }
+    // Lock widths after first calculation — sorting / re-renders keep them
+    if (_widthsLocked && _colWidths.length === state.columns.length) {
         return;
     }
     var widths = [];
@@ -355,6 +363,7 @@ function calcColumnWidths() {
         widths.push(Math.ceil(maxW));
     }
     _colWidths = widths;
+    _widthsLocked = true;
 }
 
 function applyColumnWidths() {
@@ -370,6 +379,16 @@ function applyColumnWidths() {
     var headerColgroup = document.createElement('colgroup');
     var bodyColgroup = document.createElement('colgroup');
 
+    // Checkbox column
+    var checkboxWidth = 36;
+    var checkboxCol = document.createElement('col');
+    checkboxCol.style.width = checkboxWidth + 'px';
+    headerColgroup.appendChild(checkboxCol);
+    var bodyCheckboxCol = document.createElement('col');
+    bodyCheckboxCol.style.width = checkboxWidth + 'px';
+    bodyColgroup.appendChild(bodyCheckboxCol);
+
+    // Row number column
     var rowNumWidth = 44;
     var rowNumCol = document.createElement('col');
     rowNumCol.style.width = rowNumWidth + 'px';
@@ -382,12 +401,15 @@ function applyColumnWidths() {
     for (var i = 0; i < _colWidths.length; i++) {
         totalColWidth += _colWidths[i];
     }
-    var totalWidth = rowNumWidth + totalColWidth;
+    var totalWidth = checkboxWidth + rowNumWidth + totalColWidth;
 
     var containerWidth = document.getElementById('gridContainer').clientWidth;
     var tableWidth = Math.max(totalWidth, containerWidth);
-    var extra = tableWidth - totalWidth;
-    var extraPerCol = _colWidths.length > 0 ? extra / _colWidths.length : 0;
+
+    // Only distribute extra space if user hasn't resized any columns
+    var hasUserWidths = Object.keys(_userColWidths).length > 0;
+    var extra = hasUserWidths ? 0 : Math.max(0, tableWidth - totalWidth);
+    var extraPerCol = (!hasUserWidths && _colWidths.length > 0) ? extra / _colWidths.length : 0;
 
     for (var i = 0; i < _colWidths.length; i++) {
         var w = Math.ceil(_colWidths[i] + extraPerCol);
@@ -415,11 +437,13 @@ var _resizeState = null;
 function startColumnResize(colIdx, startEvent) {
     var headerTable = document.getElementById('gridHeaderTable');
     var headerCols = headerTable.querySelectorAll('colgroup col');
-    var colEl = headerCols[colIdx + 1]; // +1 because rowNum(0) is the first col
+    // colIdx + 2 because checkbox(0) + rowNum(1) are the first two cols
+    var colEl = headerCols[colIdx + 2];
     if (!colEl) return;
 
     var startX = startEvent.clientX;
-    var startWidth = colEl ? parseInt(colEl.style.width, 10) || 100 : 100;
+    // Read the actual rendered width from the DOM (includes extra distribution)
+    var startWidth = parseInt(colEl.style.width, 10) || _colWidths[colIdx] || 100;
     var handle = startEvent.target;
     handle.classList.add('active');
 
@@ -431,16 +455,18 @@ function startColumnResize(colIdx, startEvent) {
         var newWidth = Math.max(50, _resizeState.startWidth + delta);
         _resizeState.currentWidth = newWidth;
         // Live-preview: update the col element width directly
+        // colIdx + 2 because checkbox(0) + rowNum(1) are the first two cols
         var hCols = headerTable.querySelectorAll('colgroup col');
-        if (hCols[colIdx + 1]) hCols[colIdx + 1].style.width = newWidth + 'px';
+        if (hCols[colIdx + 2]) hCols[colIdx + 2].style.width = newWidth + 'px';
         var bodyTable = document.getElementById('gridBodyTable');
         var bCols = bodyTable.querySelectorAll('colgroup col');
-        if (bCols[colIdx + 1]) bCols[colIdx + 1].style.width = newWidth + 'px';
+        if (bCols[colIdx + 2]) bCols[colIdx + 2].style.width = newWidth + 'px';
     };
 
     var onMouseUp = function() {
         if (_resizeState && _resizeState.currentWidth) {
-            // Commit the resize into _colWidths so future re-renders keep it
+            // Commit the resize into _userColWidths so future re-renders keep it
+            _userColWidths[colIdx] = _resizeState.currentWidth;
             _colWidths[colIdx] = _resizeState.currentWidth;
         }
         if (_resizeState && _resizeState.handle) {
@@ -472,6 +498,24 @@ function init() {
         lang = config.lang.startsWith('zh') ? 'zh' : 'en';
     }
     applyI18nToDom();
+
+    // Initialize export menu with last format
+    var exportItems = document.querySelectorAll('#exportMenu .tb-dropdown-item');
+    exportItems.forEach(function(item) {
+        item.classList.toggle('selected', item.getAttribute('data-action-arg') === state.lastExportFormat);
+    });
+    // Set initial button text
+    var formatNames = {
+        'csv': 'CSV',
+        'json': 'JSON',
+        'sql_insert': 'INSERT',
+        'sql_update': 'UPDATE',
+        'ddl': 'DDL'
+    };
+    var exportBtn = document.getElementById('exportFormatBtn');
+    if (exportBtn) {
+        exportBtn.textContent = (formatNames[state.lastExportFormat] || 'CSV') + ' ▼';
+    }
 
     const gridBodyWrapper = document.getElementById('gridBodyWrapper');
     gridBodyWrapper.addEventListener('scroll', onGridScroll);
@@ -842,6 +886,11 @@ function onKeyDown(e) {
 }
 
 function copySelectedCell() {
+    // If there are selected rows, copy them in the last export format
+    if (state.selectedRows.size > 0) {
+        copySelectedRowsToClipboard();
+        return;
+    }
     if (!state.selectedCell) return;
     const { row, col } = state.selectedCell;
     if (row < 0 || row >= state.rows.length) return;
@@ -853,6 +902,97 @@ function copySelectedCell() {
     } else {
         navigator.clipboard.writeText(String(val));
     }
+}
+
+function copySelectedRowsToClipboard() {
+    var format = state.lastExportFormat || 'csv';
+    var rows = [];
+    state.selectedRows.forEach(function(idx) {
+        if (idx >= 0 && idx < state.rows.length) {
+            rows.push(state.rows[idx]);
+        }
+    });
+    if (rows.length === 0) return;
+
+    var text = '';
+    var colNames = state.columns.map(function(c) { return c.name; });
+
+    switch (format) {
+        case 'csv':
+            text = colNames.join(',') + '\n';
+            rows.forEach(function(row) {
+                var vals = row.map(function(v) {
+                    if (v === null || v === undefined) return '';
+                    var s = String(v);
+                    if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1 || s.indexOf('\n') !== -1) {
+                        return '"' + s.replace(/"/g, '""') + '"';
+                    }
+                    return s;
+                });
+                text += vals.join(',') + '\n';
+            });
+            break;
+        case 'json':
+            var jsonArr = rows.map(function(row) {
+                var obj = {};
+                state.columns.forEach(function(col, i) {
+                    obj[col.name] = row[i];
+                });
+                return obj;
+            });
+            text = JSON.stringify(jsonArr, null, 2);
+            break;
+        case 'sql_insert':
+            var tableName = state.tableName || 'table';
+            rows.forEach(function(row) {
+                var vals = row.map(function(v) {
+                    if (v === null || v === undefined) return 'NULL';
+                    if (typeof v === 'number') return String(v);
+                    return "'" + String(v).replace(/'/g, "''") + "'";
+                });
+                text += 'INSERT INTO ' + tableName + ' (' + colNames.join(', ') + ') VALUES (' + vals.join(', ') + ');\n';
+            });
+            break;
+        case 'sql_update':
+            var tableName2 = state.tableName || 'table';
+            // Find primary key column index
+            var pkIdx = state.columns.findIndex(function(c) { return c.isPrimaryKey; });
+            rows.forEach(function(row) {
+                var setParts = [];
+                var whereParts = [];
+                state.columns.forEach(function(col, i) {
+                    var val = row[i];
+                    var valStr;
+                    if (val === null || val === undefined) {
+                        valStr = 'NULL';
+                    } else if (typeof val === 'number') {
+                        valStr = String(val);
+                    } else {
+                        valStr = "'" + String(val).replace(/'/g, "''") + "'";
+                    }
+                    // Use all columns in SET, first column as WHERE condition
+                    if (i === 0) {
+                        whereParts.push(col.name + ' = ' + valStr);
+                    } else {
+                        setParts.push(col.name + ' = ' + valStr);
+                    }
+                });
+                if (setParts.length > 0 && whereParts.length > 0) {
+                    text += 'UPDATE ' + tableName2 + ' SET ' + setParts.join(', ') + ' WHERE ' + whereParts.join(' AND ') + ';\n';
+                }
+            });
+            break;
+        default:
+            text = colNames.join('\t') + '\n';
+            rows.forEach(function(row) {
+                text += row.map(function(v) {
+                    return v === null || v === undefined ? '' : String(v);
+                }).join('\t') + '\n';
+            });
+    }
+
+    navigator.clipboard.writeText(text);
+    addMessage('success', '已复制 ' + rows.length + ' 行到剪贴板 (格式: ' + format.toUpperCase() + ')');
 }
 
 function handleMessage(event) {
@@ -929,6 +1069,8 @@ function handleMessage(event) {
 function handleQueryResult(data) {
     state.columns = data.columns || [];
     state.rows = data.rows || [];
+    _widthsLocked = false; // Unlock so new columns get fresh widths
+    _userColWidths = {};
     _originalRows = state.rows.slice(); // Store original order for sort reset
     state.rowCount = data.rowCount || 0;
     state.affectedRows = data.affectedRows || 0;
@@ -943,6 +1085,7 @@ function handleQueryResult(data) {
     state.sortDirection = null;
     state.selectedCell = null;
     _selectedCellEl = null;
+    state.selectedRows.clear();
     state.tableName = data.tableName || '';
     state.pendingChanges = [];
     rebuildPendingChangeMap();
@@ -1125,6 +1268,17 @@ function renderHeader() {
     const headerRow = document.getElementById('gridHeaderRow');
     headerRow.innerHTML = '';
 
+    // Select all checkbox header
+    const thCheckbox = document.createElement('th');
+    thCheckbox.className = 'cell-checkbox';
+    var selectAllCb = document.createElement('input');
+    selectAllCb.type = 'checkbox';
+    selectAllCb.id = 'selectAllCheckbox';
+    selectAllCb.title = '全选/取消全选';
+    selectAllCb.addEventListener('change', function() { toggleSelectAll(); });
+    thCheckbox.appendChild(selectAllCb);
+    headerRow.appendChild(thCheckbox);
+
     const thNum = document.createElement('th');
     thNum.className = 'row-num-header';
     thNum.textContent = '#';
@@ -1132,7 +1286,11 @@ function renderHeader() {
 
     state.columns.forEach((col, idx) => {
         const th = document.createElement('th');
-        th.onclick = () => handleSortClick(idx);
+        th.onclick = (e) => {
+            // Skip sort if resize is in progress or click target is resize handle
+            if (_resizeState || e.target.classList.contains('col-resize-handle')) return;
+            handleSortClick(idx);
+        };
 
         // Column name
         const nameSpan = document.createElement('span');
@@ -1225,6 +1383,21 @@ function renderVisibleRows() {
         tr.setAttribute('data-row', i);
         var isPlaceholder = i >= state.rows.length;
 
+        // Row checkbox
+        var tdCheckbox = document.createElement('td');
+        tdCheckbox.className = 'cell-checkbox';
+        if (!isPlaceholder) {
+            var rowCb = document.createElement('input');
+            rowCb.type = 'checkbox';
+            rowCb.className = 'row-checkbox';
+            rowCb.checked = state.selectedRows.has(i);
+            rowCb.addEventListener('change', (function(rowIdx) {
+                return function() { toggleRowSelection(rowIdx); };
+            })(i));
+            tdCheckbox.appendChild(rowCb);
+        }
+        tr.appendChild(tdCheckbox);
+
         var tdNum = document.createElement('td');
         tdNum.className = 'row-num';
         if (isPlaceholder) {
@@ -1240,6 +1413,11 @@ function renderVisibleRows() {
             if (rowChange.type === 'insert') tr.classList.add('row-new');
             if (rowChange.type === 'delete') tr.classList.add('row-deleted');
             if (rowChange.type === 'update') tr.classList.add('row-modified');
+        }
+
+        // Highlight selected rows
+        if (!isPlaceholder && state.selectedRows.has(i)) {
+            tr.classList.add('row-checked');
         }
 
         if (!isPlaceholder) {
@@ -1364,6 +1542,79 @@ function handleSortClick(colIdx) {
     }
 
     renderHeader();
+}
+
+// ─── Row Selection ───────────────────────────────────────────────────────────
+function toggleSelectAll() {
+    var selectAllCb = document.getElementById('selectAllCheckbox');
+    if (!selectAllCb) return;
+    var checked = selectAllCb.checked;
+    if (checked) {
+        for (var i = 0; i < state.rows.length; i++) {
+            state.selectedRows.add(i);
+        }
+    } else {
+        state.selectedRows.clear();
+    }
+    renderVisibleRows();
+    updateBatchButtons();
+}
+
+function toggleRowSelection(rowIdx) {
+    if (state.selectedRows.has(rowIdx)) {
+        state.selectedRows.delete(rowIdx);
+    } else {
+        state.selectedRows.add(rowIdx);
+    }
+    updateSelectAllCheckbox();
+    updateBatchButtons();
+    // Re-render to apply row highlight
+    renderVisibleRows();
+}
+
+function updateSelectAllCheckbox() {
+    var selectAllCb = document.getElementById('selectAllCheckbox');
+    if (!selectAllCb) return;
+    var total = state.rows.length;
+    if (total === 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+    } else if (state.selectedRows.size === total) {
+        selectAllCb.checked = true;
+        selectAllCb.indeterminate = false;
+    } else if (state.selectedRows.size > 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = true;
+    } else {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+    }
+}
+
+function updateBatchButtons() {
+    // Update delete button state based on selection
+    var btnDelete = document.getElementById('btnDeleteRow');
+    if (btnDelete) {
+        btnDelete.disabled = !state.editMode;
+        if (state.selectedRows.size > 0 && state.editMode) {
+            btnDelete.title = '删除选中的 ' + state.selectedRows.size + ' 行';
+        } else {
+            btnDelete.title = t('resultPanel.deleteRow');
+        }
+    }
+
+    // Update export button state based on selection
+    var btnExport = document.querySelector('[data-action="toggleExportMenu"]');
+    if (btnExport) {
+        if (state.selectedRows.size > 0) {
+            btnExport.title = '导出选中的 ' + state.selectedRows.size + ' 行';
+        } else {
+            btnExport.title = t('resultPanel.export');
+        }
+    }
+
+    // Update status bar with selection info
+    updateStatusBar();
 }
 
 function sortClientSide() {
@@ -1523,12 +1774,70 @@ function toggleExportMenu() {
     menu.classList.toggle('open');
 }
 
-function handleExport(format) {
+function selectExportFormat(format) {
     document.getElementById('exportMenu').classList.remove('open');
-    vscode.postMessage({
+    state.lastExportFormat = format;
+    // Update button text
+    var btn = document.getElementById('exportFormatBtn');
+    if (btn) {
+        var formatNames = {
+            'csv': 'CSV',
+            'json': 'JSON',
+            'sql_insert': 'INSERT',
+            'sql_update': 'UPDATE',
+            'ddl': 'DDL'
+        };
+        btn.textContent = (formatNames[format] || format) + ' ▼';
+    }
+    // Update menu to show selected format
+    var items = document.querySelectorAll('#exportMenu .tb-dropdown-item');
+    items.forEach(function(item) {
+        item.classList.toggle('selected', item.getAttribute('data-action-arg') === format);
+    });
+}
+
+function executeExport() {
+    var format = state.lastExportFormat || 'csv';
+    var message = {
         command: 'requestExport',
         format: format
+    };
+    // Include selected rows if any are selected
+    if (state.selectedRows.size > 0) {
+        message.selectedRows = Array.from(state.selectedRows);
+    }
+    vscode.postMessage(message);
+}
+
+function handleExport(format) {
+    document.getElementById('exportMenu').classList.remove('open');
+    state.lastExportFormat = format;
+    // Update button text
+    var btn = document.getElementById('exportFormatBtn');
+    if (btn) {
+        var formatNames = {
+            'csv': 'CSV',
+            'json': 'JSON',
+            'sql_insert': 'INSERT',
+            'sql_update': 'UPDATE',
+            'ddl': 'DDL'
+        };
+        btn.textContent = (formatNames[format] || format) + ' ▼';
+    }
+    // Update menu to show selected format
+    var items = document.querySelectorAll('#exportMenu .tb-dropdown-item');
+    items.forEach(function(item) {
+        item.classList.toggle('selected', item.getAttribute('data-action-arg') === format);
     });
+    var message = {
+        command: 'requestExport',
+        format: format
+    };
+    // Include selected rows if any are selected
+    if (state.selectedRows.size > 0) {
+        message.selectedRows = Array.from(state.selectedRows);
+    }
+    vscode.postMessage(message);
 }
 
 function handleExecute() {
@@ -1599,6 +1908,9 @@ function updateStatusBar() {
     }
     if (state.executionTime > 0) {
         info += (info ? ' | ' : '') + t('resultPanel.timeTaken') + ': ' + formatTime(state.executionTime);
+    }
+    if (state.selectedRows.size > 0) {
+        info += (info ? ' | ' : '') + '已选: ' + state.selectedRows.size + ' 行';
     }
     statusInfo.textContent = info;
 
@@ -2067,35 +2379,49 @@ function addRow() {
 
 function deleteRow() {
     if (!state.editMode) return;
-    if (!state.selectedCell) return;
-    var row = state.selectedCell.row;
-    if (row < 0 || row >= state.rows.length) return;
 
-    var existingChange = _pendingChangeMap[row];
-    if (existingChange && existingChange.type === 'insert') {
-        state.pendingChanges = state.pendingChanges.filter(function(c) { return c !== existingChange; });
-        state.rows.splice(row, 1);
-        state.pendingChanges.forEach(function(c) {
-            if (c.rowIndex > row) c.rowIndex--;
-        });
-    } else {
-        if (existingChange && existingChange.type === 'delete') {
-            state.pendingChanges = state.pendingChanges.filter(function(c) { return c !== existingChange; });
-        } else {
-            if (existingChange && existingChange.type === 'update') {
-                state.pendingChanges = state.pendingChanges.filter(function(c) { return c !== existingChange; });
-            }
-            var primaryKey = getPrimaryKeyValue(row);
-            var change = {
-                type: 'delete',
-                table: state.tableName,
-                primaryKey: primaryKey,
-                originalRow: state.originalRows[row] ? state.originalRows[row].slice() : [],
-                rowIndex: row,
-            };
-            state.pendingChanges.push(change);
-        }
+    // Delete selected rows if any, otherwise delete the cell's row
+    var rowsToDelete = [];
+    if (state.selectedRows.size > 0) {
+        rowsToDelete = Array.from(state.selectedRows).sort(function(a, b) { return b - a; });
+    } else if (state.selectedCell) {
+        rowsToDelete = [state.selectedCell.row];
     }
+
+    if (rowsToDelete.length === 0) return;
+
+    // Process rows from bottom to top to avoid index shifting issues
+    rowsToDelete.forEach(function(row) {
+        if (row < 0 || row >= state.rows.length) return;
+
+        var existingChange = _pendingChangeMap[row];
+        if (existingChange && existingChange.type === 'insert') {
+            state.pendingChanges = state.pendingChanges.filter(function(c) { return c !== existingChange; });
+            state.rows.splice(row, 1);
+            state.pendingChanges.forEach(function(c) {
+                if (c.rowIndex > row) c.rowIndex--;
+            });
+        } else {
+            if (existingChange && existingChange.type === 'delete') {
+                state.pendingChanges = state.pendingChanges.filter(function(c) { return c !== existingChange; });
+            } else {
+                if (existingChange && existingChange.type === 'update') {
+                    state.pendingChanges = state.pendingChanges.filter(function(c) { return c !== existingChange; });
+                }
+                var primaryKey = getPrimaryKeyValue(row);
+                var change = {
+                    type: 'delete',
+                    table: state.tableName,
+                    primaryKey: primaryKey,
+                    originalRow: state.originalRows[row] ? state.originalRows[row].slice() : [],
+                    rowIndex: row,
+                };
+                state.pendingChanges.push(change);
+            }
+        }
+    });
+
+    state.selectedRows.clear();
     rebuildPendingChangeMap();
 
     renderGrid();

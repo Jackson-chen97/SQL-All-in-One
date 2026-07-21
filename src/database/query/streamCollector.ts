@@ -40,6 +40,10 @@ export interface CollectStreamToResultOptions {
      * Optional SQL text, included in error results when the stream throws.
      */
     sql?: string;
+    /**
+     * Optional table name to attach to the result.
+     */
+    tableName?: string;
 }
 
 /**
@@ -66,7 +70,7 @@ export interface CollectStreamToResultOptions {
 export async function collectStreamToResult(
     options: CollectStreamToResultOptions,
 ): Promise<QueryResult> {
-    const { stream, queryId, maxRows, executionTime, database, sql } = options;
+    const { stream, queryId, maxRows, executionTime, database, sql, tableName } = options;
 
     const columns: ColumnMeta[] = [];
     const rows: QueryRow[] = [];
@@ -150,5 +154,6 @@ export async function collectStreamToResult(
         rowCount: reportedRowCount,
         executionTime,
         database,
+        tableName,
     };
 }

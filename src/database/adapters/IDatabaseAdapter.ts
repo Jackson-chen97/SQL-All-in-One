@@ -199,6 +199,7 @@ export interface QueryResult {
     executionTime: number;
     error?: QueryError;
     database?: string;
+    tableName?: string;
 }
 
 export interface QueryError {

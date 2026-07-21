@@ -409,7 +409,7 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
         // packets, not user input.
         const placeholders = colNames.map(() => '?').join(',');
         const commentSql =
-            `SELECT COLUMN_NAME, COLUMN_COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE ` +
+            `SELECT COLUMN_NAME, COLUMN_COMMENT, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, TABLE_NAME ` +
             `FROM INFORMATION_SCHEMA.COLUMNS ` +
             `WHERE TABLE_SCHEMA = ? AND COLUMN_NAME IN (${placeholders})`;
 
@@ -419,12 +419,14 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
             CHARACTER_MAXIMUM_LENGTH: number | null;
             NUMERIC_PRECISION: number | null;
             NUMERIC_SCALE: number | null;
+            TABLE_NAME: string;
         }>, unknown];
 
         if (!rows || rows.length === 0) return;
 
         const commentMap = new Map<string, string>();
         const sizeMap = new Map<string, string | undefined>();
+        let tableName = '';
         for (const row of rows) {
             if (row.COLUMN_COMMENT && !commentMap.has(row.COLUMN_NAME)) {
                 commentMap.set(row.COLUMN_NAME, row.COLUMN_COMMENT);
@@ -443,6 +445,10 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
                 }
                 sizeMap.set(row.COLUMN_NAME, size);
             }
+            // Get table name from the first row
+            if (!tableName && row.TABLE_NAME) {
+                tableName = row.TABLE_NAME;
+            }
         }
 
         for (const col of queryResult.columns) {
@@ -454,6 +460,11 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
             if (size !== undefined) {
                 col.size = size;
             }
+        }
+
+        // Set table name in query result
+        if (tableName && !queryResult.tableName) {
+            queryResult.tableName = tableName;
         }
     }
 
@@ -656,17 +667,20 @@ export class MysqlQueryAdapter<TShared extends IMysqlProtocolSharedContext = IMy
             await fieldsPromise;
 
             // Enrich columns with comments from INFORMATION_SCHEMA.
+            let enrichedTableName = '';
             try {
                 const database = this.shared.config?.database;
                 if (database && getColumns().length > 0) {
-                    await this.enrichColumnsWithComments(queryConn, {
+                    const tempResult: QueryResult = {
                         columns: getColumns(),
                         status: 'success',
                         rows: [],
                         rowCount: 0,
                         queryId: '',
                         executionTime: 0,
-                    }, database);
+                    };
+                    await this.enrichColumnsWithComments(queryConn, tempResult, database);
+                    enrichedTableName = tempResult.tableName || '';
                 }
             } catch (e) { /* best-effort: ignore comment enrichment errors */ }
 

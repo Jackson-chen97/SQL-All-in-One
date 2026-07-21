@@ -594,6 +594,21 @@ export class DataTransferServiceImpl implements IDataTransferService {
         );
     }
 
+    async exportToUpdate(
+        rows: QueryResultRow[],
+        columns: { name: string }[],
+        tableName: string,
+        adapter?: IDatabaseAdapter,
+    ): Promise<void> {
+        const exporter = new DataExporter();
+        await exporter.exportToUpdate(
+            rows as QueryRow[],
+            columns as ColumnMeta[],
+            tableName,
+            adapter,
+        );
+    }
+
     async exportToDdl(
         adapter: IDatabaseAdapter,
         database: string,

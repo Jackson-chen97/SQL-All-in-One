@@ -135,6 +135,44 @@ export class DataExporter {
         }
     }
 
+    async exportToUpdate(rows: QueryRow[], columns: ColumnMeta[], tableName: string, adapter?: DatabaseAdapter): Promise<void> {
+        const uri = await vscode.window.showSaveDialog({
+            filters: { 'SQL Files': ['sql'] },
+            defaultUri: vscode.Uri.file('export_update.sql'),
+        });
+
+        if (!uri) {
+            return;
+        }
+
+        const q = adapter ? adapter.schemaAdapter.quoteIdentifier.bind(adapter.schemaAdapter) : ((id: string): string => '`' + id.replace(/`/g, '``') + '`');
+        const stream = fs.createWriteStream(uri.fsPath, 'utf-8');
+
+        try {
+            for (const row of rows) {
+                const setParts: string[] = [];
+                const whereParts: string[] = [];
+                columns.forEach((col, i) => {
+                    const valStr = formatSqlValue(row[col.name]);
+                    if (i === 0) {
+                        whereParts.push(`${q(col.name)} = ${valStr}`);
+                    } else {
+                        setParts.push(`${q(col.name)} = ${valStr}`);
+                    }
+                });
+                if (setParts.length > 0 && whereParts.length > 0) {
+                    stream.write(`UPDATE ${q(tableName)} SET ${setParts.join(', ')} WHERE ${whereParts.join(' AND ')};\n`);
+                }
+            }
+
+            await this.finishStream(stream);
+            vscode.window.setStatusBarMessage(t('database.exportCompleted'), 3000);
+        } catch (error) {
+            stream.destroy();
+            throw error;
+        }
+    }
+
     async exportToDdl(adapter: DatabaseAdapter, database: string, table: string): Promise<void> {
         const uri = await vscode.window.showSaveDialog({
             filters: { 'SQL Files': ['sql'] },

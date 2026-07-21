@@ -68,14 +68,18 @@
       <div class="result-section" id="resultSection">
         <div class="result-toolbar">
           <button class="tb-btn" id="btnRefresh" data-action="handleRefresh" data-i18n-title="resultPanel.refresh" title="刷新"><svg class="tb-icon" viewBox="0 0 16 16"><path fill="currentColor" d="M13.5 8a5.5 5.5 0 1 1-1.68-3.93L14 2.5V7h-4.5l1.82-1.82A4 4 0 1 0 12.1 8h1.4z"/></svg><span data-i18n="resultPanel.refresh">刷新</span></button>
-          <div class="tb-dropdown" id="exportDropdown">
-            <button class="tb-btn" data-action="toggleExportMenu" data-i18n-title="resultPanel.export" title="导出"><svg class="tb-icon" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M3 13h10M8 2v8M5 7l3 3 3-3"/></svg><span data-i18n="resultPanel.export">导出</span> ▼</button>
-            <div class="tb-dropdown-menu" id="exportMenu">
-              <div class="tb-dropdown-item" data-action="handleExport" data-action-arg="csv">CSV</div>
-              <div class="tb-dropdown-item" data-action="handleExport" data-action-arg="json">JSON</div>
-              <div class="tb-dropdown-item" data-action="handleExport" data-action-arg="sql_insert">SQL INSERT</div>
-              <div class="tb-dropdown-item" data-action="handleExport" data-action-arg="ddl">DDL</div>
+          <div class="export-format-group">
+            <div class="tb-dropdown" id="exportDropdown">
+              <button class="tb-btn export-format-btn" data-action="toggleExportMenu" id="exportFormatBtn" title="选择导出格式">CSV ▼</button>
+              <div class="tb-dropdown-menu" id="exportMenu">
+                <div class="tb-dropdown-item selected" data-action="selectExportFormat" data-action-arg="csv">CSV</div>
+                <div class="tb-dropdown-item" data-action="selectExportFormat" data-action-arg="json">JSON</div>
+                <div class="tb-dropdown-item" data-action="selectExportFormat" data-action-arg="sql_insert">SQL INSERT</div>
+                <div class="tb-dropdown-item" data-action="selectExportFormat" data-action-arg="sql_update">SQL UPDATE</div>
+                <div class="tb-dropdown-item" data-action="selectExportFormat" data-action-arg="ddl">DDL</div>
+              </div>
             </div>
+            <button class="tb-btn" data-action="executeExport" data-i18n-title="resultPanel.export" title="导出"><svg class="tb-icon" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M3 13h10M8 2v8M5 7l3 3 3-3"/></svg><span data-i18n="resultPanel.export">导出</span></button>
           </div>
           <span class="tb-separator"></span>
           <button class="tb-btn" id="btnEditMode" data-action="toggleEditMode" data-i18n-title="resultPanel.editMode" title="编辑模式"><svg class="tb-icon" viewBox="0 0 16 16"><path fill="currentColor" d="M12.2 2.3l1.5 1.5L5.5 12H4v-1.5z"/><path fill="currentColor" d="M4 12h1.5l8.2-8.2-1.5-1.5z" opacity="0"/></svg><span data-i18n="resultPanel.editMode">编辑</span></button>

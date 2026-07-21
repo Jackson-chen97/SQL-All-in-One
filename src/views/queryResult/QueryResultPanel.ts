@@ -21,7 +21,7 @@ type WebviewMessage =
     | { command: 'executeQuery'; sql: string }
     | { command: 'executePanelSql'; sql: string }
     | { command: 'cancelQuery' }
-    | { command: 'requestExport'; format: string; options?: Record<string, unknown> }
+    | { command: 'requestExport'; format: string; options?: Record<string, unknown>; selectedRows?: number[] }
     | { command: 'requestSort'; column: string; direction: string }
     | { command: 'requestFilter'; conditions: FilterCondition[] }
     | { command: 'requestPage'; page: number }
@@ -220,7 +220,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                         }
                         break;
                     case 'requestExport':
-                        await this._handleExport(msg.format, msg.options);
+                        await this._handleExport(msg.format, msg.options, msg.selectedRows);
                         break;
                     case 'requestSort':
                         if (msg.column && msg.direction && this.onRequestSort) {
@@ -740,7 +740,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
         } catch (e) { /* ignore: database list is best-effort */ handleError(e, 'QueryResultPanel.sendDatabaseList', ErrorCategory.SUB_ITEM) }
     }
 
-    private async _handleExport(format: string, options?: Record<string, unknown>): Promise<void> {
+    private async _handleExport(format: string, options?: Record<string, unknown>, selectedRows?: number[]): Promise<void> {
         if (!this._currentResult) {
             vscode.window.showWarningMessage(t('resultPanel.noResultToExport'));
             return;
@@ -748,7 +748,13 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
 
         try {
             const columns = this._currentResult.columns;
-            const rows = this._currentResult.rows;
+            // Filter rows if selectedRows is provided
+            let rows = this._currentResult.rows;
+            if (selectedRows && selectedRows.length > 0) {
+                rows = selectedRows
+                    .filter(idx => idx >= 0 && idx < rows.length)
+                    .map(idx => rows[idx]);
+            }
             const tableName = (options?.tableName as string) || 'exported_table';
 
             switch (format) {
@@ -762,6 +768,12 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                     const activeConnCfg = this._connectionService.getActiveConnection();
                     const insertAdapter = activeConnCfg ? this._connectionService.getAdapter(activeConnCfg.id) : undefined;
                     await this._dataTransferService.exportToInsert(rows, columns, tableName, undefined, insertAdapter);
+                    break;
+                }
+                case 'sql_update': {
+                    const activeConnCfg2 = this._connectionService.getActiveConnection();
+                    const updateAdapter = activeConnCfg2 ? this._connectionService.getAdapter(activeConnCfg2.id) : undefined;
+                    await this._dataTransferService.exportToUpdate(rows, columns, tableName, updateAdapter);
                     break;
                 }
                 case 'ddl':

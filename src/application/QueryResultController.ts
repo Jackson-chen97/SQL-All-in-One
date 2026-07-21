@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { IConnectionService, IQueryService, IDataEditService, QueryExecutionResult } from './ports';
 import type { FilterCondition, PendingChange, ForeignKeyOption } from '../shared/editTypes';
 import { SqlStatementDetector } from '../database/query/SqlStatementDetector';
+import { extractTableNames } from '../completion/AstCompletionProvider';
 import { t } from '../i18n/index';
 import { handleError, ErrorCategory } from '../core/errorHandler';
 
@@ -194,7 +195,9 @@ export class QueryResultController {
                         const conn = this.connectionId
                             ? this.connectionService.getConnection(this.connectionId)
                             : this.connectionService.getActiveConnection();
-                        panel.showResult(result, conn?.name, conn?.color);
+                        // Extract table name from SQL for export
+                        const tableName = this.extractTableNameFromSql(sql);
+                        panel.showResult(result, conn?.name, conn?.color, tableName);
                     }
                     return;
                 }
@@ -252,5 +255,24 @@ export class QueryResultController {
                 handleError(e, 'QueryResultController.onChangeDatabase', ErrorCategory.FEATURE);
             }
         };
+    }
+
+    private extractTableNameFromSql(sql: string): string {
+        // Match table names with or without backticks: `db`.`table` or `db.table` or just table
+        const patterns = [
+            /FROM\s+([`"'\w.]+)/i,
+            /INTO\s+([`"'\w.]+)/i,
+            /UPDATE\s+([`"'\w.]+)/i,
+        ];
+        for (const pattern of patterns) {
+            const match = sql.match(pattern);
+            if (match && match[1]) {
+                // Remove backticks and quotes
+                const cleaned = match[1].replace(/[`"']/g, '');
+                const parts = cleaned.split('.');
+                return parts[parts.length - 1];
+            }
+        }
+        return '';
     }
 }

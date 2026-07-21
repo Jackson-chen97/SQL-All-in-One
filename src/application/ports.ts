@@ -243,6 +243,7 @@ export interface IDataTransferService {
     exportToCsv(rows: QueryResultRow[], columns: { name: string }[], options?: CsvExportOptions): Promise<void>;
     exportToJson(rows: QueryResultRow[], columns: { name: string }[], options?: JsonExportOptions): Promise<void>;
     exportToInsert(rows: QueryResultRow[], columns: { name: string }[], tableName: string, options?: InsertExportOptions, adapter?: IDatabaseAdapter): Promise<void>;
+    exportToUpdate(rows: QueryResultRow[], columns: { name: string }[], tableName: string, adapter?: IDatabaseAdapter): Promise<void>;
     exportToDdl(adapter: IDatabaseAdapter, database: string, table: string): Promise<void>;
 }
 

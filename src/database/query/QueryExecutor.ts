@@ -302,6 +302,8 @@ export class QueryExecutor {
                     params: options.params,
                     signal: ac.signal,
                 };
+                // Extract table name from SQL
+                const tableName = this.extractTableNameFromSql(sql);
                 try {
                     const stream = adapter.queryAdapter.executeStream!(sql, streamOptions);
                     return await collectStreamToResult({
@@ -311,6 +313,7 @@ export class QueryExecutor {
                         executionTime: Date.now() - startTime,
                         database: options.database,
                         sql,
+                        tableName,
                     });
                 } finally {
                     streamCancelDisposable.dispose();
@@ -394,6 +397,25 @@ export class QueryExecutor {
 
     private delay(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    private extractTableNameFromSql(sql: string): string {
+        // Match table names with or without backticks: `db`.`table` or `db.table` or just table
+        const patterns = [
+            /FROM\s+([`"'\w.]+)/i,
+            /INTO\s+([`"'\w.]+)/i,
+            /UPDATE\s+([`"'\w.]+)/i,
+        ];
+        for (const pattern of patterns) {
+            const match = sql.match(pattern);
+            if (match && match[1]) {
+                // Remove backticks and quotes
+                const cleaned = match[1].replace(/[`"']/g, '');
+                const parts = cleaned.split('.');
+                return parts[parts.length - 1];
+            }
+        }
+        return '';
     }
 
     dispose(): void {
