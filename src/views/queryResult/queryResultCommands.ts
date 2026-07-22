@@ -24,10 +24,13 @@ import { t } from '../../i18n';
  * the call site and injected into the panel so the panel itself (and the
  * LanguageBridge it owns) stay free of any service-locator calls.
  */
-function ensurePanel(context: vscode.ExtensionContext): QueryResultPanel | undefined {
+async function ensurePanel(context: vscode.ExtensionContext): Promise<QueryResultPanel | undefined> {
     const existing = QueryResultPanel.getCurrentInstance();
     if (existing) {
-        // Reveal the existing panel so it gets focus on subsequent table clicks
+        // Wait for the panel to finish initializing (HTML loaded, handlers
+        // registered) before revealing it. Without this, a second click
+        // during init would find the instance but reveal a half-ready panel.
+        await existing._ready;
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
@@ -97,8 +100,8 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
     disposables.push(
         vscode.commands.registerCommand(
             'hive-formatter.showQueryLoading',
-            (sql: string) => {
-                const panel = ensurePanel(context);
+            async (sql: string) => {
+                const panel = await ensurePanel(context);
                 if (!panel) return;
                 panel.showLoading(sql);
             },
@@ -108,13 +111,13 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
     disposables.push(
         vscode.commands.registerCommand(
             'hive-formatter.showQueryResult',
-            (
+            async (
                 result: QueryResult,
                 connectionName?: string,
                 connectionColor?: string,
                 tableName?: string,
             ) => {
-                const panel = ensurePanel(context);
+                const panel = await ensurePanel(context);
                 if (!panel) return;
                 panel.showResult(result, connectionName, connectionColor, tableName);
             },
@@ -124,8 +127,8 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
     disposables.push(
         vscode.commands.registerCommand(
             'hive-formatter.showQueryError',
-            (error: QueryError, _sql?: string) => {
-                const panel = ensurePanel(context);
+            async (error: QueryError, _sql?: string) => {
+                const panel = await ensurePanel(context);
                 if (!panel) return;
                 panel.showError(error);
             },
@@ -135,8 +138,8 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
     disposables.push(
         vscode.commands.registerCommand(
             'hive-formatter.setQueryResultPanelSql',
-            (sql: string, autoExecute?: boolean) => {
-                const panel = ensurePanel(context);
+            async (sql: string, autoExecute?: boolean) => {
+                const panel = await ensurePanel(context);
                 if (!panel) return;
                 if (autoExecute) {
                     panel.setSqlAndExecute(sql);
@@ -150,8 +153,8 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
     disposables.push(
         vscode.commands.registerCommand(
             'hive-formatter.sendDatabaseList',
-            (databases: string[], current: string) => {
-                const panel = ensurePanel(context);
+            async (databases: string[], current: string) => {
+                const panel = await ensurePanel(context);
                 if (!panel) return;
                 panel.sendDatabaseList(databases, current);
             },
@@ -161,8 +164,8 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
     disposables.push(
         vscode.commands.registerCommand(
             'hive-formatter.setQueryResultPanelCallbacks',
-            (connectionId?: string, database?: string) => {
-                const panel = ensurePanel(context);
+            async (connectionId?: string, database?: string) => {
+                const panel = await ensurePanel(context);
                 if (!panel) return;
                 ensureController(panel, connectionId, database);
             },

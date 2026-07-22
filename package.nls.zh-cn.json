@@ -226,6 +226,7 @@
     "hive-formatter.command.selectDatabases.title": "选择数据库",
     "hive-formatter.command.filterObjectGroup.title": "筛选...",
     "hive-formatter.command.filterTableColumns.title": "筛选列...",
+    "hive-formatter.command.filterMaterializedViewColumns.title": "筛选列...",
     "hive-formatter.viewsContainers.activitybar.title": "SQL All in One",
     "hive-formatter.configuration.title": "SQL All in One",
     "hive-formatter.command.formatSelection.title": "格式化选区 (SQL All in One)",

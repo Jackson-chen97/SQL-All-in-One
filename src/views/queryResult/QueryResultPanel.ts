@@ -53,7 +53,19 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
     }
 
     public static getCurrentInstance(): QueryResultPanel | undefined {
-        return BaseWebviewPanel.getExistingInstance<QueryResultPanel>(QueryResultPanel.viewType);
+        const fromMap = BaseWebviewPanel.getExistingInstance<QueryResultPanel>(QueryResultPanel.viewType);
+        if (fromMap) {
+            return fromMap;
+        }
+        // Fallback: the static map may have lost the entry (e.g. VS Code
+        // disposes the panel when moving between editor groups, or during
+        // drag-to-new-window). Check the last-known instance.
+        if (QueryResultPanel._lastInstance && !QueryResultPanel._lastInstance.isDisposed) {
+            // Re-register it so future lookups find it.
+            BaseWebviewPanel.registerInstance(QueryResultPanel._lastInstance);
+            return QueryResultPanel._lastInstance;
+        }
+        return undefined;
     }
 
     protected readonly panelConfig: WebviewPanelConfig = {
@@ -69,8 +81,19 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
     private _sendLanguageDataTimer: ReturnType<typeof setTimeout> | undefined;
     private _webviewReady = false;
     private _pendingSql: { sql: string; autoExecute: boolean } | undefined;
+    private _pendingMessages: unknown[] = [];
+    private _lastSql: { sql: string; autoExecute: boolean } | undefined;
+    public readonly _ready: Promise<void>;
+    private _readyResolve!: () => void;
+    private _readyReject!: (e: unknown) => void;
     private readonly _connectionService: IConnectionService;
     private readonly _dataTransferService: IDataTransferService;
+
+    // Fallback: keep a reference to the last-created instance so that if the
+    // static map becomes stale (e.g. VS Code disposes/moves the panel) we can
+    // still find a live instance.
+    private static _lastInstance: QueryResultPanel | undefined;
+    private static _instanceGeneration = 0;
 
     public onExecuteQuery?: (sql: string) => void;
     public onCancelQuery?: () => void;
@@ -87,7 +110,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
     public onExecutePanelSql?: (sql: string) => Promise<void>;
     public onChangeDatabase?: (database: string) => Promise<void>;
 
-    public static createOrShow(
+    public static async createOrShow(
         extensionUri: vscode.Uri,
         _context: vscode.ExtensionContext,
         connectionService: IConnectionService,
@@ -95,17 +118,20 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
         schemaProvider: SchemaProvider,
         hoverProvider: SqlHoverProvider,
         completionProvider: SqlCompletionProvider,
-    ): QueryResultPanel {
+    ): Promise<QueryResultPanel> {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        const existing = BaseWebviewPanel.getExistingInstance<QueryResultPanel>(QueryResultPanel.viewType);
+        // Check the static map first, then the fallback last-known instance.
+        const existing = QueryResultPanel.getCurrentInstance();
         if (existing) {
+            await existing._ready;
             BaseWebviewPanel.revealExisting(QueryResultPanel.viewType, column || vscode.ViewColumn.Two);
             return existing;
         }
 
+        QueryResultPanel._instanceGeneration++;
         const panel = QueryResultPanel.createWebviewPanel(
             QueryResultPanel.viewType,
             t('resultPanel.queryResult'),
@@ -122,7 +148,20 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
             hoverProvider,
             completionProvider,
         );
+        // Track as the last-known instance for fallback recovery.
+        QueryResultPanel._lastInstance = instance;
+        // Register BEFORE awaiting _ready so that a second click during
+        // initialization finds the existing instance and waits for it
+        // instead of creating a duplicate panel.
         BaseWebviewPanel.registerInstance(instance);
+        try {
+            await instance._ready;
+        } catch (e) {
+            // If initialization fails, unregister so the next click can
+            // create a fresh panel instead of being stuck on a broken one.
+            BaseWebviewPanel.unregisterInstance(QueryResultPanel.viewType);
+            throw e;
+        }
         return instance;
     }
 
@@ -144,7 +183,11 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
             hoverProvider,
             completionProvider,
         );
-        this._initialize();
+        this._ready = new Promise<void>((resolve, reject) => {
+            this._readyResolve = resolve;
+            this._readyReject = reject;
+        });
+        this._initialize().catch((e) => this._readyReject(e));
     }
 
     private async _initialize(): Promise<void> {
@@ -352,6 +395,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                     }
                     case 'webviewReady': {
                         this._webviewReady = true;
+                        this._flushPendingMessages();
                         this._sendLanguageData();
                         this._sendDatabaseList();
                         if (this._pendingSql) {
@@ -360,12 +404,21 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
                                 data: this._pendingSql,
                             });
                             this._pendingSql = undefined;
+                        } else if (this._lastSql) {
+                            // Webview was recreated (e.g. tab dragged to new window).
+                            // Resend the last SQL so the editor is re-initialized.
+                            this.postMessage({
+                                type: 'setEditorSql',
+                                data: this._lastSql,
+                            });
                         }
                         break;
                     }
                 }
             }
         );
+
+        this._readyResolve();
     }
 
     public showResult(result: QueryResult, connectionName?: string, connectionColor?: string, tableName?: string): void {
@@ -630,6 +683,21 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
         }
     }
 
+    protected override postMessage(message: unknown): void {
+        if (this._webviewReady) {
+            super.postMessage(message);
+        } else {
+            this._pendingMessages.push(message);
+        }
+    }
+
+    private _flushPendingMessages(): void {
+        for (const msg of this._pendingMessages) {
+            super.postMessage(msg);
+        }
+        this._pendingMessages = [];
+    }
+
     public showLoading(sql: string): void {
         this.postMessage({
             type: 'queryStart',
@@ -646,6 +714,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
 
     public setSqlAndExecute(sql: string): void {
         const data = { sql, autoExecute: true };
+        this._lastSql = data;
         if (this._webviewReady) {
             this.postMessage({
                 type: 'setEditorSql',
@@ -658,6 +727,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
 
     public setSql(sql: string): void {
         const data = { sql, autoExecute: false };
+        this._lastSql = data;
         if (this._webviewReady) {
             this.postMessage({
                 type: 'setEditorSql',
@@ -706,6 +776,12 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
         if (this._sendLanguageDataTimer) {
             clearTimeout(this._sendLanguageDataTimer);
             this._sendLanguageDataTimer = undefined;
+        }
+        this._pendingMessages = [];
+        this._pendingSql = undefined;
+        this._lastSql = undefined;
+        if (QueryResultPanel._lastInstance === this) {
+            QueryResultPanel._lastInstance = undefined;
         }
         this._languageBridge.dispose();
         super.dispose();

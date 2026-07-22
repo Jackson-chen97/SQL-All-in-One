@@ -101,7 +101,8 @@
         "onCommand:hive-formatter.importConnections",
         "onCommand:hive-formatter.selectDatabases",
         "onCommand:hive-formatter.filterObjectGroup",
-        "onCommand:hive-formatter.filterTableColumns"
+        "onCommand:hive-formatter.filterTableColumns",
+        "onCommand:hive-formatter.filterMaterializedViewColumns"
     ],
     "extensionKind": [
         "workspace"
@@ -580,6 +581,11 @@
             {
                 "command": "hive-formatter.filterTableColumns",
                 "title": "%hive-formatter.command.filterTableColumns.title%",
+                "icon": "$(filter)"
+            },
+            {
+                "command": "hive-formatter.filterMaterializedViewColumns",
+                "title": "%hive-formatter.command.filterMaterializedViewColumns.title%",
                 "icon": "$(filter)"
             }
         ],
@@ -2141,6 +2147,11 @@
                 {
                     "command": "hive-formatter.filterTableColumns",
                     "when": "view == hive-formatter.databaseExplorer && viewItem == table",
+                    "group": "inline"
+                },
+                {
+                    "command": "hive-formatter.filterMaterializedViewColumns",
+                    "when": "view == hive-formatter.databaseExplorer && viewItem =~ /materializedView/",
                     "group": "inline"
                 }
             ]

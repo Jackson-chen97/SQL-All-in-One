@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DatabaseTreeProvider } from './DatabaseTreeProvider';
-import { ConnectionTreeNode, ObjectGroupTreeNode, TableTreeNode } from './treeNodes';
+import { ConnectionTreeNode, ObjectGroupTreeNode, TableTreeNode, MaterializedViewTreeNode } from './treeNodes';
 import { getContainer, Tokens } from '../../core/diContainer';
 import type { IConnectionService, ISchemaService } from '../../application/ports';
 
@@ -142,6 +142,17 @@ export function registerTreeProviderCommands(context: vscode.ExtensionContext): 
             async (node: TableTreeNode) => {
                 if (!treeProvider) return;
                 await treeProvider.filterTableColumns(node);
+            },
+        ),
+    );
+
+    // Command: filter materialized view columns by keyword
+    disposables.push(
+        vscode.commands.registerCommand(
+            'hive-formatter.filterMaterializedViewColumns',
+            async (node: MaterializedViewTreeNode) => {
+                if (!treeProvider) return;
+                await treeProvider.filterMaterializedViewColumns(node);
             },
         ),
     );

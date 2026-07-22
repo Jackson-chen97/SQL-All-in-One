@@ -73,6 +73,10 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
     private tableColumnFilters: Map<string, string> = new Map();
     /** Cached filtered column count for display purposes */
     private tableColumnFilteredCounts: Map<string, number> = new Map();
+    /** Per-materialized-view column keyword filter. Key = MaterializedViewTreeNode.id */
+    private mvColumnFilters: Map<string, string> = new Map();
+    /** Cached filtered column count for materialized view display purposes */
+    private mvColumnFilteredCounts: Map<string, number> = new Map();
 
     private _disposables: vscode.Disposable[] = [];
 
@@ -319,6 +323,30 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
     }
 
     /**
+     * Prompt the user for a keyword to filter columns inside a materialized view node.
+     * Pass an empty string or cancel to clear the filter.
+     */
+    async filterMaterializedViewColumns(node: MaterializedViewTreeNode): Promise<void> {
+        const currentFilter = this.mvColumnFilters.get(node.id) || '';
+        const keyword = await vscode.window.showInputBox({
+            prompt: t('explorer.filterMaterializedViewColumns.prompt', node.mvName),
+            placeHolder: t('explorer.filterMaterializedViewColumns.placeholder'),
+            value: currentFilter,
+            ignoreFocusOut: true
+        });
+
+        if (keyword !== undefined) {
+            if (keyword.trim()) {
+                this.mvColumnFilters.set(node.id, keyword.trim());
+            } else {
+                this.mvColumnFilters.delete(node.id);
+                this.mvColumnFilteredCounts.delete(node.id);
+            }
+            this.refresh(node);
+        }
+    }
+
+    /**
      * Get the set of selected database names for a connection, or undefined (show all).
      */
     getSelectedDatabases(connectionId: string): Set<string> | undefined {
@@ -369,6 +397,18 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
                     ? ` (${filteredCount} ${t('explorer.filtered')})`
                     : '';
                 item.description = `${rowCountDisplay}${filterDisplay} ${t('explorer.filtered')}: ${filterKeyword}`.trim();
+            }
+        }
+
+        // Override description for materialized view nodes with active column filter
+        if (element instanceof MaterializedViewTreeNode) {
+            const filterKeyword = this.mvColumnFilters.get(element.id);
+            if (filterKeyword) {
+                const filteredCount = this.mvColumnFilteredCounts.get(element.id);
+                const filterDisplay = filteredCount !== undefined
+                    ? ` (${filteredCount} ${t('explorer.filtered')})`
+                    : '';
+                item.description = `${filterDisplay} ${t('explorer.filtered')}: ${filterKeyword}`.trim();
             }
         }
 
@@ -873,7 +913,8 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
     }
 
     private async getMaterializedViewChildren(parent: MaterializedViewTreeNode): Promise<ITreeNode[]> {
-        const cacheKey = parent.id;
+        const filterKeyword = this.mvColumnFilters.get(parent.id);
+        const cacheKey = filterKeyword ? `${parent.id}::filter=${filterKeyword}` : parent.id;
         const cached = this.nodeCache.get(cacheKey);
         if (cached !== undefined) {
             return cached;
@@ -902,6 +943,20 @@ export class DatabaseTreeProvider implements vscode.TreeDataProvider<ITreeNode> 
             } catch (e) {
                 // Column info may not be available for all materialized views
                 handleError(e, 'DatabaseTreeProvider.getMaterializedViewChildren.columns', ErrorCategory.SUB_ITEM);
+            }
+
+            // Apply column keyword filter if set
+            if (filterKeyword) {
+                const lowerKeyword = filterKeyword.toLowerCase();
+                const filteredChildren = children.filter(child =>
+                    child instanceof ColumnTreeNode &&
+                    child.label.toLowerCase().includes(lowerKeyword)
+                );
+                this.mvColumnFilteredCounts.set(parent.id, filteredChildren.length);
+                children.length = 0;
+                children.push(...filteredChildren);
+            } else {
+                this.mvColumnFilteredCounts.delete(parent.id);
             }
 
             this.nodeCache.set(cacheKey, children);
