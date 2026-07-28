@@ -185,6 +185,8 @@ const state = {
     sortColumn: null,
     sortDirection: null,
     filterConditions: [{ column: '', operator: '=', value: '' }],
+    unfilteredRows: null,
+    unfilteredRowCount: 0,
     selectedCell: null,
     messages: [],
     history: [],
@@ -709,6 +711,8 @@ function handleQueryResult(data) {
     state.sortColumn = null;
     state.sortDirection = null;
     state.selectedCell = null;
+    state.unfilteredRows = null;
+    state.unfilteredRowCount = 0;
     state.tableName = data.tableName || '';
     state.originalRows = (data.rows || []).map(function(row) { return Object.assign({}, row); });
     state.pendingChanges = [];
@@ -1158,10 +1162,114 @@ function applyFilter() {
             conditions.push({ column: col, operator: op, value: val });
         }
     });
-    vscode.postMessage({
-        command: 'requestFilter',
-        conditions: conditions
+
+    filterClientSide(conditions);
+}
+
+function filterClientSide(conditions) {
+    // Save original rows on first filter
+    if (!state.unfilteredRows) {
+        state.unfilteredRows = state.rows;
+        state.unfilteredRowCount = state.rowCount;
+    }
+
+    // If no conditions with a column selected, restore original
+    if (!conditions || conditions.length === 0) {
+        state.rows = state.unfilteredRows;
+        state.rowCount = state.unfilteredRowCount;
+        state.unfilteredRows = null;
+        state.unfilteredRowCount = 0;
+        state.currentPage = 1;
+        renderGrid();
+        updateStatusBar();
+        updateEmptyState();
+        return;
+    }
+
+    // Find column index by name
+    function colIndex(colName) {
+        for (var i = 0; i < state.columns.length; i++) {
+            if (state.columns[i].name === colName) return i;
+        }
+        return -1;
+    }
+
+    // Parse IN / NOT IN values
+    function parseInValues(val) {
+        return val.split(',').map(function(v) { return v.trim(); }).filter(function(v) { return v !== ''; });
+    }
+
+    // Parse BETWEEN values
+    function parseBetweenValues(val) {
+        var parts = val.split(',').map(function(v) { return v.trim(); });
+        return parts.length >= 2 ? [parts[0], parts[1]] : [parts[0] || '', ''];
+    }
+
+    // Apply a single condition to a row
+    function matchRow(row, cond) {
+        var idx = colIndex(cond.column);
+        if (idx === -1) return true;
+        var cellVal = row[idx];
+        var op = cond.operator;
+        var val = cond.value;
+
+        // Null handling
+        if (op === 'IS NULL') return cellVal === null || cellVal === undefined;
+        if (op === 'IS NOT NULL') return cellVal !== null && cellVal !== undefined;
+
+        // Convert cell to string for comparison
+        var cellStr = cellVal === null || cellVal === undefined ? '' : String(cellVal);
+        var cellNum = Number(cellVal);
+
+        switch (op) {
+            case '=':
+                // Try numeric comparison first
+                if (!isNaN(cellNum) && !isNaN(Number(val))) return cellNum === Number(val);
+                return cellStr === val;
+            case '!=':
+                if (!isNaN(cellNum) && !isNaN(Number(val))) return cellNum !== Number(val);
+                return cellStr !== val;
+            case '>':
+                if (!isNaN(cellNum) && !isNaN(Number(val))) return cellNum > Number(val);
+                return cellStr > val;
+            case '<':
+                if (!isNaN(cellNum) && !isNaN(Number(val))) return cellNum < Number(val);
+                return cellStr < val;
+            case '>=':
+                if (!isNaN(cellNum) && !isNaN(Number(val))) return cellNum >= Number(val);
+                return cellStr >= val;
+            case '<=':
+                if (!isNaN(cellNum) && !isNaN(Number(val))) return cellNum <= Number(val);
+                return cellStr <= val;
+            case 'LIKE':
+                return cellStr.toLowerCase().indexOf(val.toLowerCase()) !== -1;
+            case 'NOT LIKE':
+                return cellStr.toLowerCase().indexOf(val.toLowerCase()) === -1;
+            case 'IN':
+                return parseInValues(val).indexOf(cellStr) !== -1;
+            case 'NOT IN':
+                return parseInValues(val).indexOf(cellStr) === -1;
+            case 'BETWEEN': {
+                var bounds = parseBetweenValues(val);
+                var lo = bounds[0], hi = bounds[1];
+                if (!isNaN(cellNum) && !isNaN(Number(lo)) && !isNaN(Number(hi))) {
+                    return cellNum >= Number(lo) && cellNum <= Number(hi);
+                }
+                return cellStr >= lo && cellStr <= hi;
+            }
+            default:
+                return true;
+        }
+    }
+
+    state.rows = state.unfilteredRows.filter(function(row) {
+        return conditions.every(function(cond) { return matchRow(row, cond); });
     });
+    state.rowCount = state.rows.length;
+    state.currentPage = 1;
+    renderGrid();
+    updateStatusBar();
+    updateEmptyState();
 }
 
 function toggleExportMenu() {

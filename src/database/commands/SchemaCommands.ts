@@ -206,11 +206,10 @@ export function registerSchemaCommands(
             const q = newQueryAdapter ? newQueryAdapter.schemaAdapter.quoteIdentifier.bind(newQueryAdapter.schemaAdapter) : ((id: string): string => '`' + id.replace(/`/g, '``') + '`');
             const content = database ? `USE ${q(database)};\n\n` : '';
 
-            // Ensure the panel exists and bind a controller pinned to
-            // (connectionId, database). The views layer owns panel creation
-            // and controller attachment.
+            // Force a new query panel (dispose existing if any) and bind a
+            // controller pinned to (connectionId, database).
             await vscode.commands.executeCommand(
-                'hive-formatter.setQueryResultPanelCallbacks',
+                'hive-formatter.forceNewQueryPanel',
                 connectionId,
                 database,
             );

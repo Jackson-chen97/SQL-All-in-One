@@ -119,15 +119,11 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
         hoverProvider: SqlHoverProvider,
         completionProvider: SqlCompletionProvider,
     ): Promise<QueryResultPanel> {
-        const column = vscode.window.activeTextEditor
-            ? vscode.window.activeTextEditor.viewColumn
-            : undefined;
-
         // Check the static map first, then the fallback last-known instance.
         const existing = QueryResultPanel.getCurrentInstance();
         if (existing) {
             await existing._ready;
-            BaseWebviewPanel.revealExisting(QueryResultPanel.viewType, column || vscode.ViewColumn.Two);
+            existing._panel.reveal();
             return existing;
         }
 
@@ -136,7 +132,7 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
             QueryResultPanel.viewType,
             t('resultPanel.queryResult'),
             extensionUri,
-            { viewColumn: column ? column + 1 : vscode.ViewColumn.Two }
+            { viewColumn: vscode.ViewColumn.Active }
         );
 
         const instance = new QueryResultPanel(
@@ -162,6 +158,40 @@ export class QueryResultPanel extends BaseWebviewPanel implements IQueryResultPa
             BaseWebviewPanel.unregisterInstance(QueryResultPanel.viewType);
             throw e;
         }
+        return instance;
+    }
+
+    /**
+     * Create a brand-new query panel without disposing the existing one.
+     * Used by the "new query" command where the user wants to keep the
+     * current panel open and start a separate query in a new window.
+     */
+    public static async createNewPanel(
+        extensionUri: vscode.Uri,
+        _context: vscode.ExtensionContext,
+        connectionService: IConnectionService,
+        dataTransferService: IDataTransferService,
+        schemaProvider: SchemaProvider,
+        hoverProvider: SqlHoverProvider,
+        completionProvider: SqlCompletionProvider,
+    ): Promise<QueryResultPanel> {
+        const panel = QueryResultPanel.createWebviewPanel(
+            QueryResultPanel.viewType,
+            t('resultPanel.queryResult'),
+            extensionUri,
+            { viewColumn: vscode.ViewColumn.Active }
+        );
+
+        const instance = new QueryResultPanel(
+            panel,
+            extensionUri,
+            connectionService,
+            dataTransferService,
+            schemaProvider,
+            hoverProvider,
+            completionProvider,
+        );
+        await instance._ready;
         return instance;
     }
 

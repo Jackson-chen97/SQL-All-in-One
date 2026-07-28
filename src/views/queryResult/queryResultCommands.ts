@@ -31,10 +31,7 @@ async function ensurePanel(context: vscode.ExtensionContext): Promise<QueryResul
         // registered) before revealing it. Without this, a second click
         // during init would find the instance but reveal a half-ready panel.
         await existing._ready;
-        const column = vscode.window.activeTextEditor
-            ? vscode.window.activeTextEditor.viewColumn
-            : undefined;
-        BaseWebviewPanel.revealExisting(QueryResultPanel.viewType, column || vscode.ViewColumn.Two);
+        BaseWebviewPanel.revealExisting(QueryResultPanel.viewType);
         return existing;
     }
     const container = getContainer();
@@ -167,6 +164,30 @@ export function registerQueryResultCommands(context: vscode.ExtensionContext): v
             async (connectionId?: string, database?: string) => {
                 const panel = await ensurePanel(context);
                 if (!panel) return;
+                ensureController(panel, connectionId, database);
+            },
+        ),
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand(
+            'hive-formatter.forceNewQueryPanel',
+            async (connectionId?: string, database?: string) => {
+                const container = getContainer();
+                const connectionService = container.get<IConnectionService>(Tokens.ConnectionService);
+                const dataTransferService = container.get<IDataTransferService>(Tokens.DataTransferService);
+                const schemaProvider = container.get<SchemaProvider>(Tokens.SchemaProvider);
+                const hoverProvider = container.get<SqlHoverProvider>(Tokens.HoverProvider);
+                const completionProvider = container.get<SqlCompletionProvider>(Tokens.CompletionProvider);
+                const panel = await QueryResultPanel.createNewPanel(
+                    context.extensionUri,
+                    context,
+                    connectionService,
+                    dataTransferService,
+                    schemaProvider,
+                    hoverProvider,
+                    completionProvider,
+                );
                 ensureController(panel, connectionId, database);
             },
         ),
